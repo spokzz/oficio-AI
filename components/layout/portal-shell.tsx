@@ -16,6 +16,9 @@ export function PortalShell({
   nav,
   children,
   badge,
+  searchLabel = "Search",
+  searchPlaceholder = "Search customers, jobs, quotes",
+  signOutLabel = "Sign out",
   topbarActions
 }: {
   title: string;
@@ -24,6 +27,9 @@ export function PortalShell({
   nav: NavItem[];
   children: ReactNode;
   badge?: string;
+  searchLabel?: string;
+  searchPlaceholder?: string;
+  signOutLabel?: string;
   topbarActions?: ReactNode;
 }) {
   return (
@@ -45,15 +51,15 @@ export function PortalShell({
         </nav>
         <form action={signOutUser}>
           <button className="sidebar-signout" type="submit">
-            Sign out
+            {signOutLabel}
           </button>
         </form>
       </aside>
       <main className="portal-main">
         <div className="portal-topbar">
           <label className="search-shell" aria-label="Search">
-            <span aria-hidden="true">Search</span>
-            <input placeholder="Search customers, jobs, quotes" />
+            <span aria-hidden="true">{searchLabel}</span>
+            <input placeholder={searchPlaceholder} />
             <kbd>Cmd F</kbd>
           </label>
           <div className="topbar-actions">
