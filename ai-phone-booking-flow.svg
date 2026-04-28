@@ -1,0 +1,96 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#F7F5EF"/>
+  <text x="70" y="82" font-family="Inter, Arial, sans-serif" font-size="36" font-weight="900" fill="#173F35">AI phone booking flow</text>
+  <text x="70" y="116" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="650" fill="#6B6256">Customer speaks English. Owner sees and receives Spanish updates.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2 2 L10 6 L2 10 Z" fill="#2F7A55"/>
+    </marker>
+  </defs>
+
+  <rect x="74" y="180" width="250" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="118" cy="242" r="24" fill="#E8F3ED"/>
+  <text x="109" y="251" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">1</text>
+  <text x="160" y="226" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Client calls</text>
+  <text x="160" y="256" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Existing business number</text>
+  <text x="160" y="280" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">or Twilio number</text>
+
+  <line x1="332" y1="242" x2="440" y2="242" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="456" y="180" width="250" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="500" cy="242" r="24" fill="#E8F3ED"/>
+  <text x="491" y="251" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">2</text>
+  <text x="542" y="226" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">AI answers</text>
+  <text x="542" y="256" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Polite English voice</text>
+  <text x="542" y="280" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Clear AI disclosure</text>
+
+  <line x1="714" y1="242" x2="822" y2="242" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="838" y="180" width="250" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="882" cy="242" r="24" fill="#E8F3ED"/>
+  <text x="873" y="251" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">3</text>
+  <text x="924" y="226" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Collect details</text>
+  <text x="924" y="256" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Name, phone, address</text>
+  <text x="924" y="280" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Service and preferred time</text>
+
+  <line x1="1096" y1="242" x2="1204" y2="242" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="1220" y="180" width="160" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="1264" cy="242" r="24" fill="#E8F3ED"/>
+  <text x="1255" y="251" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">4</text>
+  <text x="1310" y="226" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Check</text>
+  <text x="1310" y="256" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Availability</text>
+  <text x="1310" y="280" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Crew capacity</text>
+
+  <line x1="1300" y1="314" x2="1300" y2="408" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="1174" y="424" width="250" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="1218" cy="486" r="24" fill="#E8F3ED"/>
+  <text x="1209" y="495" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">5</text>
+  <text x="1260" y="470" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Book job</text>
+  <text x="1260" y="500" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Save appointment</text>
+  <text x="1260" y="524" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Create customer record</text>
+
+  <line x1="1166" y1="486" x2="1058" y2="486" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="792" y="424" width="250" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="836" cy="486" r="24" fill="#E8F3ED"/>
+  <text x="827" y="495" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">6</text>
+  <text x="878" y="470" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Text client</text>
+  <text x="878" y="500" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">English confirmation</text>
+  <text x="878" y="524" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Date, time, address</text>
+
+  <line x1="784" y1="486" x2="676" y2="486" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="410" y="424" width="250" height="124" rx="8" fill="#173F35"/>
+  <circle cx="454" cy="486" r="24" fill="#F6C85F"/>
+  <text x="445" y="495" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#173F35">7</text>
+  <text x="496" y="470" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#FFFFFF">Text owner</text>
+  <text x="496" y="500" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#DDEFE5">Spanish summary</text>
+  <text x="496" y="524" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#DDEFE5">Action needed if any</text>
+
+  <line x1="402" y1="486" x2="294" y2="486" stroke="#2F7A55" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="36" y="424" width="242" height="124" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <circle cx="80" cy="486" r="24" fill="#E8F3ED"/>
+  <text x="71" y="495" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="900" fill="#2F7A55">8</text>
+  <text x="122" y="470" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Dashboard</text>
+  <text x="122" y="500" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Calendar updates</text>
+  <text x="122" y="524" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="650" fill="#574F45">Revenue and bookings</text>
+
+  <rect x="116" y="662" width="348" height="110" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <text x="146" y="704" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Option A: Call forwarding</text>
+  <text x="146" y="736" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="650" fill="#574F45">Fastest launch. Existing number forwards missed</text>
+  <text x="146" y="760" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="650" fill="#574F45">or all calls to the AI phone line.</text>
+
+  <rect x="546" y="662" width="348" height="110" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <text x="576" y="704" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Option B: Port number</text>
+  <text x="576" y="736" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="650" fill="#574F45">Best long-term control. Move the current</text>
+  <text x="576" y="760" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="650" fill="#574F45">business number into Twilio.</text>
+
+  <rect x="976" y="662" width="348" height="110" rx="8" fill="#FFFFFF" stroke="#E4DED2"/>
+  <text x="1006" y="704" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="850" fill="#173F35">Option C: SMS hosting</text>
+  <text x="1006" y="736" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="650" fill="#574F45">Possible for some landline/VoIP numbers.</text>
+  <text x="1006" y="760" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="650" fill="#574F45">Messaging rules still apply.</text>
+</svg>

@@ -1,0 +1,36 @@
+{
+  "name": "oficio-ai",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Bilingual AI receptionist and job dashboard for U.S. home-service businesses.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/run-tests.mjs"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.105.0",
+    "next": "^16.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.4",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "postcss": "^8.5.12"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
