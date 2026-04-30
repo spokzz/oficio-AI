@@ -59,7 +59,12 @@ In Supabase Dashboard:
 6. Add Redirect URLs:
    - `http://localhost:3000/owner`
    - `http://localhost:3000/admin`
+   - `http://localhost:3000/auth/reset-password`
+   - `http://localhost:3000/auth/callback`
    - your production owner/admin URLs later
+   - your production auth reset/callback URLs later, for example:
+     - `https://your-domain.com/auth/reset-password`
+     - `https://your-domain.com/auth/callback`
 
 ## 4. Create Your Internal Admin Login
 

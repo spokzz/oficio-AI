@@ -71,7 +71,7 @@ export type Job = {
   final_value: number | null;
   owner_notes: string | null;
   ai_notes: string | null;
-  customers?: Pick<Customer, "full_name" | "phone" | "preferred_language"> | null;
+  customers?: Pick<Customer, "full_name" | "phone" | "preferred_language" | "address"> | null;
 };
 
 export type Quote = {

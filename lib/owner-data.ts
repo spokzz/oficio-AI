@@ -78,7 +78,7 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
     supabase.from("manual_billing_accounts").select("*").eq("business_id", businessId).maybeSingle<ManualBillingAccount>(),
     supabase
       .from("jobs")
-      .select("*, customers(full_name, phone, preferred_language)")
+      .select("*, customers(full_name, phone, preferred_language, address)")
       .eq("business_id", businessId)
       .order("scheduled_start", { ascending: false })
       .limit(200),

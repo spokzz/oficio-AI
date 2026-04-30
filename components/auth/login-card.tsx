@@ -1,8 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useActionState, useState, type ReactNode } from "react";
+import { useActionState, useState, type FormEvent, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
+import { createClient } from "@/lib/supabase/client";
 
 type LoginCardProps = {
   title: string;
@@ -10,8 +11,13 @@ type LoginCardProps = {
   subtitle: string;
   helper: string;
   action: (state: { error?: string }, formData: FormData) => Promise<{ error?: string }>;
+  resetAction: (
+    state: { error?: string; success?: string },
+    formData: FormData
+  ) => Promise<{ error?: string; success?: string }>;
   submitLabel: string;
   variant?: "owner" | "admin";
+  notice?: string;
   children?: ReactNode;
 };
 
@@ -29,11 +35,11 @@ const loginCopy = {
       forgot: "Forgot password?",
       submit: "Login",
       pending: "Signing in...",
-      divider: "Or login with",
-      google: "Google",
-      facebook: "Facebook",
-      signupText: "Don't have an account?",
-      signup: "Signup",
+      resetTitle: "Reset password",
+      resetSubtitle: "Enter your owner email and we'll send a reset link.",
+      resetSubmit: "Send reset link",
+      resetPending: "Sending...",
+      backToLogin: "Back to login",
       helper: "Use the email and password created for your business account."
     },
     es: {
@@ -46,11 +52,11 @@ const loginCopy = {
       forgot: "¿Olvidaste tu contraseña?",
       submit: "Entrar",
       pending: "Entrando...",
-      divider: "O entra con",
-      google: "Google",
-      facebook: "Facebook",
-      signupText: "¿No tienes cuenta?",
-      signup: "Regístrate",
+      resetTitle: "Restablecer contraseña",
+      resetSubtitle: "Escribe tu correo de dueño y enviaremos un enlace.",
+      resetSubmit: "Enviar enlace",
+      resetPending: "Enviando...",
+      backToLogin: "Volver al login",
       helper: "Usa el correo y contraseña creados para tu negocio."
     }
   },
@@ -65,11 +71,11 @@ const loginCopy = {
       forgot: "Forgot password?",
       submit: "Login",
       pending: "Signing in...",
-      divider: "Or login with",
-      google: "Google",
-      facebook: "Facebook",
-      signupText: "Need admin access?",
-      signup: "Contact owner",
+      resetTitle: "Reset password",
+      resetSubtitle: "Enter your admin email and we'll send a reset link.",
+      resetSubmit: "Send reset link",
+      resetPending: "Sending...",
+      backToLogin: "Back to login",
       helper: "Admin access requires your user role to be platform_admin."
     }
   }
@@ -115,11 +121,81 @@ function HeroTitle({ language, variant }: { language: LoginLanguage; variant: "o
   return <>{loginCopy.admin.en.heroTitle}</>;
 }
 
-export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabel, variant = "owner", children }: LoginCardProps) {
+export function LoginCard({
+  title,
+  eyebrow,
+  subtitle,
+  helper,
+  action,
+  resetAction,
+  submitLabel,
+  variant = "owner",
+  notice,
+  children
+}: LoginCardProps) {
   const [language, setLanguage] = useState<LoginLanguage>("en");
+  const [isResetMode, setIsResetMode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [state, formAction] = useActionState(action, {});
+  const [resetMessage, setResetMessage] = useState<{ error?: string; success?: string }>({});
+  const [isSendingReset, setIsSendingReset] = useState(false);
   const copy = variant === "admin" ? loginCopy.admin.en : loginCopy.owner[language];
+
+  function passwordResetSendError(message: string) {
+    const normalizedMessage = message.toLowerCase();
+    const resetUrl = `${window.location.origin}/auth/reset-password`;
+
+    if (normalizedMessage.includes("redirect") || normalizedMessage.includes("not allowed")) {
+      return `Supabase blocked the reset link redirect. Add this URL to Authentication > URL Configuration > Redirect URLs: ${resetUrl}`;
+    }
+
+    if (normalizedMessage.includes("email address not authorized")) {
+      return "Supabase blocked the email because the default email service only sends to authorized team addresses. Add this email to the Supabase project team for testing, or configure custom SMTP.";
+    }
+
+    if (normalizedMessage.includes("rate limit") || normalizedMessage.includes("too many")) {
+      return "Supabase email rate limit was reached. Wait a few minutes or configure custom SMTP for password reset emails.";
+    }
+
+    return `Supabase could not send the password reset email: ${message}`;
+  }
+
+  async function handleResetSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSendingReset(true);
+    setResetMessage({});
+
+    const formData = new FormData(event.currentTarget);
+    const checkedAccount = await resetAction({}, formData);
+
+    if (checkedAccount.error) {
+      setResetMessage({ error: checkedAccount.error });
+      setIsSendingReset(false);
+      return;
+    }
+
+    const email = checkedAccount.success;
+
+    if (!email) {
+      setResetMessage({ error: "We could not verify this account. Talk to an admin." });
+      setIsSendingReset(false);
+      return;
+    }
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/reset-password?portal=${variant}`
+    });
+
+    if (error) {
+      setResetMessage({ error: passwordResetSendError(error.message) });
+      setIsSendingReset(false);
+      return;
+    }
+
+    setResetMessage({ success: "Password reset email sent. Check your inbox." });
+    setIsSendingReset(false);
+  }
 
   return (
     <main className="auth-page">
@@ -157,47 +233,47 @@ export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabe
           <div className="auth-logo-row">
             <Image alt="Oficio AI" height={54} priority src="/brand/oficio-ai-logo.svg" width={240} />
           </div>
-          <h1>{copy.welcome}</h1>
-          <p className="subcopy">{copy.subtitle}</p>
-          <form action={formAction} className="auth-form">
-            {variant === "owner" ? <input name="language" type="hidden" value={language} /> : null}
-            <label>
-              <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
-            </label>
-            <div className="password-field">
-              <input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder={copy.password} required />
-              <button
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                onClick={() => setShowPassword((value) => !value)}
-                type="button"
-              >
-                <PasswordEyeIcon />
+          <h1>{isResetMode ? copy.resetTitle : copy.welcome}</h1>
+          <p className="subcopy">{isResetMode ? copy.resetSubtitle : copy.subtitle}</p>
+          {notice && !isResetMode ? <p className="form-success">{notice}</p> : null}
+          {isResetMode ? (
+            <form className="auth-form" onSubmit={handleResetSubmit}>
+              <input name="portal" type="hidden" value={variant} />
+              <label>
+                <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
+              </label>
+              {resetMessage.error ? <p className="form-error">{resetMessage.error}</p> : null}
+              {resetMessage.success ? <p className="form-success">{resetMessage.success}</p> : null}
+              <button className="auth-submit" disabled={isSendingReset} type="submit">
+                {isSendingReset ? copy.resetPending : copy.resetSubmit}
               </button>
-            </div>
-            <a className="forgot-link" href="#">
-              {copy.forgot}
-            </a>
-            {state.error ? <p className="form-error">{state.error}</p> : null}
-            <SubmitButton label={copy.submit} pendingLabel={copy.pending} />
-          </form>
-          <div className="auth-divider">
-            <span />
-            <strong>{copy.divider}</strong>
-            <span />
-          </div>
-          <div className="social-login-row">
-            <button type="button">
-              <span className="social-dot google-dot">G</span>
-              {copy.google}
-            </button>
-            <button type="button">
-              <span className="social-dot facebook-dot">f</span>
-              {copy.facebook}
-            </button>
-          </div>
-          <p className="auth-helper">
-            {copy.signupText} <a href="#">{copy.signup}</a>
-          </p>
+              <button className="forgot-link auth-text-button" onClick={() => setIsResetMode(false)} type="button">
+                {copy.backToLogin}
+              </button>
+            </form>
+          ) : (
+            <form action={formAction} className="auth-form">
+              {variant === "owner" ? <input name="language" type="hidden" value={language} /> : null}
+              <label>
+                <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
+              </label>
+              <div className="password-field">
+                <input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder={copy.password} required />
+                <button
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((value) => !value)}
+                  type="button"
+                >
+                  <PasswordEyeIcon />
+                </button>
+              </div>
+              <button className="forgot-link auth-text-button" onClick={() => setIsResetMode(true)} type="button">
+                {copy.forgot}
+              </button>
+              {state.error ? <p className="form-error">{state.error}</p> : null}
+              <SubmitButton label={copy.submit} pendingLabel={copy.pending} />
+            </form>
+          )}
           <p className="auth-footnote">{copy.helper}</p>
           {children}
         </div>
