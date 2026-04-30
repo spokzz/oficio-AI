@@ -1,14 +1,41 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CalendarIcon, DollarIcon, LeafIcon, MessageIcon, UsersIcon } from "@/components/ui/icons";
+import { useActionState, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
+import {
+  addOwnerBooking,
+  addOwnerCustomer,
+  deleteOwnerBooking,
+  deleteOwnerCustomer,
+  updateOwnerBooking,
+  updateOwnerCustomer,
+  type AddBookingState,
+  type AddCustomerState
+} from "@/app/actions/owner";
+import {
+  CalendarIcon,
+  DollarIcon,
+  EyeIcon,
+  LeafIcon,
+  MessageIcon,
+  PencilIcon,
+  PlusIcon,
+  SortIcon,
+  TrashIcon,
+  UsersIcon
+} from "@/components/ui/icons";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency, formatDateTime } from "@/lib/format";
+import { customerSourceOptions, type CustomerSourceOption } from "@/lib/customer-sources";
+import { serviceOptions, type ServiceOption } from "@/lib/services";
 import type { OwnerPortalData } from "@/lib/owner-data";
-import type { Customer } from "@/lib/types";
+import type { Customer, Job } from "@/lib/types";
 
-type Tab = "home" | "bookings" | "customers" | "quotes" | "messages" | "settings";
+type Tab = "home" | "bookings" | "customers" | "quotes" | "messages";
 type Lang = "es" | "en";
+type BookingView = "current" | "past";
+type CustomerSort = "asc" | "desc";
 
 const copy = {
   es: {
@@ -17,23 +44,124 @@ const copy = {
     todayJobs: "Trabajos hoy",
     revenue: "Ingresos",
     recovered: "Llamadas recuperadas",
+    today: "Hoy",
+    currentData: "Datos actuales",
+    aiOutcomes: "Resultados AI",
     bookings: "Reservas",
     customers: "Clientes",
     quotes: "Cotizaciones",
     messages: "Mensajes",
-    settings: "Ajustes",
     agenda: "Agenda de hoy",
     pendingQuote: "Cotización para aprobar",
     noJobs: "No hay trabajos todavía.",
     approve: "Aprobar",
     edit: "Editar precio",
     photos: "Pedir fotos",
-    businessSettings: "Ajustes del negocio",
-    radius: "Radio de servicio",
-    billing: "Facturación manual",
-    plan: "Plan",
-    paymentStatus: "Estado de pago",
-    nextDue: "Próximo pago",
+    noPendingQuotes: "No hay cotizaciones pendientes.",
+    aiCallAnalytics: "Análisis de llamadas AI",
+    weeklyAiCallActivity: "Actividad semanal de llamadas AI",
+    anaVoiceAgent: "Agente de voz Ana",
+    liveTestWindow: "Ventana de prueba en vivo",
+    job: "Trabajo",
+    customer: "Cliente",
+    schedule: "Horario",
+    status: "Estado",
+    value: "Valor",
+    name: "Nombre",
+    newCustomer: "Cliente nuevo",
+    phone: "Teléfono",
+    language: "Idioma",
+    source: "Fuente",
+    sourceQuestion: "¿Cómo nos encontró?",
+    address: "Dirección",
+    bookingAddress: "Dirección del trabajo",
+    addBooking: "Agregar reserva",
+    addBookingTitle: "Agregar reserva",
+    addBookingSubtitle: "Agenda un trabajo para un cliente existente o nuevo.",
+    bookingDate: "Fecha y hora",
+    bookingValue: "Valor estimado",
+    yardCleaningBooking: "Reserva de limpieza de patio",
+    currentBookings: "Reservas actuales",
+    pastBooking: "Reservas pasadas",
+    pastBookingSubtitle: "Lista de todas las citas pasadas.",
+    bookingDetails: "Detalles de la reserva",
+    editBooking: "Editar reserva",
+    editBookingTitle: "Editar reserva",
+    deleteBooking: "Eliminar reserva",
+    confirmDeleteBooking: "¿Eliminar esta reserva?",
+    bookingDeleted: "Reserva eliminada.",
+    chooseCustomer: "Elegir cliente",
+    missing: "Faltante",
+    unknown: "Desconocido",
+    noAddress: "Sin dirección",
+    service: "Servicio",
+    serviceFee: "Tarifa de servicio",
+    noAiObservations: "No hay observaciones de AI todavía.",
+    review: "Revisar",
+    actions: "Acciones",
+    close: "Cerrar",
+    confirmDeleteCustomer: "Eliminar este cliente?",
+    customerDeleted: "Cliente eliminado.",
+    aiSummaries: "Resúmenes AI",
+    summary: "Resumen",
+    addCustomer: "Agregar cliente",
+    addCustomerTitle: "Agregar cliente",
+    addCustomerSubtitle: "Crea o actualiza la información del cliente.",
+    fullName: "Nombre completo",
+    email: "Email",
+    preferredLanguage: "Idioma preferido",
+    autoDetect: "Detectar automáticamente",
+    spanish: "Español",
+    english: "Inglés",
+    notes: "Notas",
+    cancel: "Cancelar",
+    customerDetails: "Detalles del cliente",
+    deleteCustomer: "Eliminar cliente",
+    editCustomer: "Editar cliente",
+    editCustomerTitle: "Editar cliente",
+    nameAscending: "Nombre A-Z",
+    nameDescending: "Nombre Z-A",
+    noNotes: "Sin notas",
+    viewCustomer: "Ver cliente",
+    viewBooking: "Ver",
+    newCustomerOption: "Cliente nuevo",
+    totalCustomer: "Total cliente",
+    saveCustomer: "Guardar cliente",
+    saving: "Guardando...",
+    updateCustomer: "Actualizar cliente",
+    updating: "Actualizando...",
+    updateBooking: "Actualizar reserva",
+    notSet: "No definido",
+    statuses: {
+      accepted: "Aceptada",
+      approved: "Aprobada",
+      canceled: "Cancelado",
+      completed: "Completado",
+      confirmed: "Confirmado",
+      declined: "Rechazada",
+      draft: "Borrador",
+      expired: "Vencida",
+      in_progress: "En progreso",
+      lead: "Cliente potencial",
+      needs_owner_approval: "Necesita aprobación",
+      pending: "Pendiente",
+      sent: "Enviada"
+    },
+    services: {
+      landscaping: "Paisajismo",
+      mowing: "Corte de césped",
+      tree_cutting: "Corte de árboles",
+      yard_cleanup: "Limpieza de patio",
+      irrigation: "Riego"
+    },
+    sources: {
+      referral: "Referencia",
+      facebook: "Facebook",
+      google: "Google",
+      website: "Sitio web",
+      instagram: "Instagram",
+      other: "Otro"
+    },
     languageNote: "El AI habla el idioma del cliente y manda resumen al dueño en español.",
     saved: "Guardado para demo. En producción esto llamará una acción del servidor.",
     actionSent: "Acción lista. En producción se guardará en Supabase y notificará al cliente."
@@ -44,75 +172,340 @@ const copy = {
     todayJobs: "Jobs today",
     revenue: "Revenue",
     recovered: "Recovered calls",
+    today: "Today",
+    currentData: "Current data",
+    aiOutcomes: "AI outcomes",
     bookings: "Bookings",
     customers: "Customers",
     quotes: "Quotes",
     messages: "Messages",
-    settings: "Settings",
     agenda: "Today's agenda",
     pendingQuote: "Quote to approve",
     noJobs: "No jobs yet.",
     approve: "Approve",
     edit: "Edit price",
     photos: "Ask for photos",
-    businessSettings: "Business settings",
-    radius: "Service radius",
-    billing: "Manual billing",
-    plan: "Plan",
-    paymentStatus: "Payment status",
-    nextDue: "Next due",
+    noPendingQuotes: "No pending quotes.",
+    aiCallAnalytics: "AI Call Analytics",
+    weeklyAiCallActivity: "Weekly AI call activity",
+    anaVoiceAgent: "Ana Voice Agent",
+    liveTestWindow: "Live test window",
+    job: "Job",
+    customer: "Customer",
+    schedule: "Schedule",
+    status: "Status",
+    value: "Value",
+    name: "Name",
+    newCustomer: "New customer",
+    phone: "Phone",
+    language: "Language",
+    source: "Source",
+    sourceQuestion: "How did they hear about us?",
+    address: "Address",
+    bookingAddress: "Job address",
+    addBooking: "Add booking",
+    addBookingTitle: "Add booking",
+    addBookingSubtitle: "Schedule a job for an existing or new customer.",
+    bookingDate: "Date and time",
+    bookingValue: "Estimated value",
+    yardCleaningBooking: "Yard cleaning booking",
+    currentBookings: "Current bookings",
+    pastBooking: "Past booking",
+    pastBookingSubtitle: "List of all past appointments.",
+    bookingDetails: "Booking details",
+    editBooking: "Edit booking",
+    editBookingTitle: "Edit booking",
+    deleteBooking: "Delete booking",
+    confirmDeleteBooking: "Delete this booking?",
+    bookingDeleted: "Booking deleted.",
+    chooseCustomer: "Choose customer",
+    missing: "Missing",
+    unknown: "Unknown",
+    noAddress: "No address",
+    service: "Service",
+    serviceFee: "Service fee",
+    noAiObservations: "No AI observations yet.",
+    review: "Review",
+    actions: "Actions",
+    close: "Close",
+    confirmDeleteCustomer: "Delete this customer?",
+    customerDeleted: "Customer deleted.",
+    aiSummaries: "AI summaries",
+    summary: "Summary",
+    addCustomer: "Add customer",
+    addCustomerTitle: "Add customer",
+    addCustomerSubtitle: "Create or update the customer profile.",
+    fullName: "Full name",
+    email: "Email",
+    preferredLanguage: "Preferred language",
+    autoDetect: "Auto-detect",
+    spanish: "Spanish",
+    english: "English",
+    notes: "Notes",
+    cancel: "Cancel",
+    customerDetails: "Customer details",
+    deleteCustomer: "Delete customer",
+    editCustomer: "Edit customer",
+    editCustomerTitle: "Edit customer",
+    nameAscending: "Name A-Z",
+    nameDescending: "Name Z-A",
+    noNotes: "No notes",
+    viewCustomer: "View customer",
+    viewBooking: "View",
+    newCustomerOption: "New customer",
+    totalCustomer: "Total customer",
+    saveCustomer: "Save customer",
+    saving: "Saving...",
+    updateCustomer: "Update customer",
+    updating: "Updating...",
+    updateBooking: "Update booking",
+    notSet: "Not set",
+    statuses: {
+      accepted: "Accepted",
+      approved: "Approved",
+      canceled: "Canceled",
+      completed: "Completed",
+      confirmed: "Confirmed",
+      declined: "Declined",
+      draft: "Draft",
+      expired: "Expired",
+      in_progress: "In progress",
+      lead: "Lead",
+      needs_owner_approval: "Needs approval",
+      pending: "Pending",
+      sent: "Sent"
+    },
+    services: {
+      landscaping: "Landscaping",
+      mowing: "Mowing",
+      tree_cutting: "Tree cutting",
+      yard_cleanup: "Yard cleaning",
+      irrigation: "Irrigation"
+    },
+    sources: {
+      referral: "Referral",
+      facebook: "Facebook",
+      google: "Google",
+      website: "Website",
+      instagram: "Instagram",
+      other: "Other"
+    },
     languageNote: "The AI speaks the customer's language and sends the owner a Spanish summary.",
     saved: "Saved for demo. In production this will call a server action.",
     actionSent: "Action ready. In production this will save in Supabase and notify the customer."
   }
 };
 
-function customerName(customer?: Customer | Pick<Customer, "full_name"> | null) {
-  return customer?.full_name ?? "New customer";
+type OwnerCopy = (typeof copy)[Lang];
+
+function customerName(customer?: Customer | Pick<Customer, "full_name"> | null, fallback = "New customer") {
+  return customer?.full_name ?? fallback;
+}
+
+function statusLabel(labels: OwnerCopy, status: string) {
+  const statuses: Record<string, string> = labels.statuses;
+  return statuses[status] ?? status.replaceAll("_", " ");
+}
+
+function serviceLabel(labels: OwnerCopy, service?: string | null) {
+  if (!service) return labels.notSet;
+  const services: Record<string, string> = labels.services;
+  return services[service] ?? service.replaceAll("_", " ");
+}
+
+function titleCase(value: string) {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function bookingTitleLabel(labels: OwnerCopy, job: Job) {
+  if (job.service_type === "yard_cleanup") return labels.yardCleaningBooking;
+  return titleCase(job.title);
+}
+
+function sourceLabel(labels: OwnerCopy, source?: string | null) {
+  if (!source) return labels.unknown;
+  const sources: Record<string, string> = labels.sources;
+  return sources[source] ?? source.replaceAll("_", " ");
+}
+
+function languageLabel(labels: OwnerCopy, language?: string | null) {
+  if (language === "en") return labels.english;
+  if (language === "es") return labels.spanish;
+  if (language === "auto") return labels.autoDetect;
+  return language || labels.unknown;
+}
+
+function serviceFeeLabel(labels: OwnerCopy, fee?: number | null) {
+  const value = fee ?? 0;
+
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 2,
+    minimumFractionDigits: value % 1 === 0 ? 0 : 2,
+    style: "currency"
+  }).format(value);
+}
+
+function isTodayJob(job: OwnerPortalData["jobs"][number]) {
+  if (!job.scheduled_start) return false;
+
+  const scheduled = new Date(job.scheduled_start);
+  const today = new Date();
+
+  return (
+    scheduled.getFullYear() === today.getFullYear() &&
+    scheduled.getMonth() === today.getMonth() &&
+    scheduled.getDate() === today.getDate()
+  );
+}
+
+function isPastBooking(job: OwnerPortalData["jobs"][number]) {
+  if (!job.scheduled_start) return false;
+
+  const scheduled = new Date(job.scheduled_start);
+  if (Number.isNaN(scheduled.getTime())) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return scheduled < today;
+}
+
+function scheduledTime(job: OwnerPortalData["jobs"][number]) {
+  const time = job.scheduled_start ? new Date(job.scheduled_start).getTime() : 0;
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function toDateTimeLocalValue(value: string | null | undefined) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
 }
 
 function Toast({ message }: { message: string | null }) {
   return message ? <div className="toast show">{message}</div> : null;
 }
 
-export function OwnerDashboard({ data, initialLanguage = "es" }: { data: OwnerPortalData; initialLanguage?: Lang }) {
-  const [activeTab, setActiveTab] = useState<Tab>("home");
-  const [language, setLanguage] = useState<Lang>(initialLanguage);
+export function OwnerDashboard({
+  data,
+  initialLanguage = "es",
+  initialTab = "home"
+}: {
+  data: OwnerPortalData;
+  initialLanguage?: Lang;
+  initialTab?: Tab;
+}) {
+  const activeTab = initialTab;
+  const language = initialLanguage;
   const [toast, setToast] = useState<string | null>(null);
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [detailBooking, setDetailBooking] = useState<Job | null>(null);
+  const [editBooking, setEditBooking] = useState<Job | null>(null);
+  const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
+  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [, startDeleteTransition] = useTransition();
+  const router = useRouter();
   const t = copy[language];
 
   const pendingQuote = useMemo(
     () => data.quotes.find((quote) => quote.status === "needs_owner_approval" || quote.status === "draft") ?? data.quotes[0],
     [data.quotes]
   );
+  const scheduledBookings = useMemo(() => data.jobs.filter((job) => job.scheduled_start && job.status !== "canceled"), [data.jobs]);
+  const currentBookings = useMemo(() => scheduledBookings.filter((job) => !isPastBooking(job)).sort((a, b) => scheduledTime(a) - scheduledTime(b)), [scheduledBookings]);
+  const pastBookings = useMemo(() => scheduledBookings.filter(isPastBooking).sort((a, b) => scheduledTime(b) - scheduledTime(a)), [scheduledBookings]);
+  const todayJobs = useMemo(() => scheduledBookings.filter(isTodayJob), [scheduledBookings]);
 
-  function showToast(message: string) {
+  const showToast = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(null), 2500);
-  }
+  }, []);
+
+  const handleCustomerAdded = useCallback(
+    (message: string) => {
+      setIsCustomerModalOpen(false);
+      setEditCustomer(null);
+      showToast(message);
+      router.refresh();
+    },
+    [router, showToast]
+  );
+
+  const handleBookingAdded = useCallback(
+    (message: string) => {
+      setIsBookingModalOpen(false);
+      setEditBooking(null);
+      showToast(message);
+      router.refresh();
+    },
+    [router, showToast]
+  );
+
+  const handleBookingDeleted = useCallback(
+    (booking: Job) => {
+      if (!window.confirm(t.confirmDeleteBooking)) {
+        return;
+      }
+
+      startDeleteTransition(async () => {
+        const result = await deleteOwnerBooking(booking.id);
+
+        if (result.error) {
+          showToast(result.error);
+          return;
+        }
+
+        setDetailBooking(null);
+        setEditBooking(null);
+        showToast(result.success ?? t.bookingDeleted);
+        router.refresh();
+      });
+    },
+    [router, showToast, t.bookingDeleted, t.confirmDeleteBooking]
+  );
+
+  const handleCustomerDeleted = useCallback(
+    (customer: Customer) => {
+      if (!window.confirm(t.confirmDeleteCustomer)) {
+        return;
+      }
+
+      startDeleteTransition(async () => {
+        const result = await deleteOwnerCustomer(customer.id);
+
+        if (result.error) {
+          showToast(result.error);
+          return;
+        }
+
+        setDetailCustomer(null);
+        setEditCustomer(null);
+        showToast(result.success ?? t.customerDeleted);
+        router.refresh();
+      });
+    },
+    [router, showToast, t.confirmDeleteCustomer, t.customerDeleted]
+  );
 
   return (
     <>
-      <div className="toolbar" style={{ marginBottom: 18 }}>
-        {(["home", "bookings", "customers", "quotes", "messages", "settings"] as Tab[]).map((tab) => (
-          <button className={`button ${activeTab === tab ? "gold" : "ghost"}`} key={tab} onClick={() => setActiveTab(tab)} type="button">
-            {t[tab]}
-          </button>
-        ))}
-      </div>
-
       {activeTab === "home" ? (
         <div className="grid">
           <div className="grid stats-grid">
             <Stat featured label={t.totalBookings} value={data.metrics.totalBookings} foot="+ Supabase" icon={<CalendarIcon />} />
-            <Stat label={t.todayJobs} value={data.metrics.todayJobs} foot="Today" icon={<LeafIcon />} />
-            <Stat label={t.revenue} value={formatCurrency(data.metrics.revenue)} foot="Current data" icon={<DollarIcon />} />
-            <Stat label={t.recovered} value={data.metrics.recoveredCalls} foot="AI outcomes" icon={<MessageIcon />} />
+            <Stat label={t.todayJobs} value={data.metrics.todayJobs} foot={t.today} icon={<LeafIcon />} />
+            <Stat label={t.revenue} value={formatCurrency(data.metrics.revenue)} foot={t.currentData} icon={<DollarIcon />} />
+            <Stat label={t.recovered} value={data.metrics.recoveredCalls} foot={t.aiOutcomes} icon={<MessageIcon />} />
           </div>
           <div className="grid two-col">
             <section className="card">
               <h2>{t.agenda}</h2>
-              <JobList jobs={data.jobs} empty={t.noJobs} />
+              <JobList empty={t.noJobs} jobs={todayJobs} labels={t} onOpenJob={(job) => setDetailBooking(job)} />
             </section>
             <section className="card dark">
               <h2>{t.pendingQuote}</h2>
@@ -123,7 +516,7 @@ export function OwnerDashboard({ data, initialLanguage = "es" }: { data: OwnerPo
                   </p>
                   <div>
                     <div className="stat-label" style={{ color: "#cfe8db" }}>
-                      {customerName(pendingQuote.customers)}
+                      {customerName(pendingQuote.customers, t.newCustomer)}
                     </div>
                     <div className="stat-value" style={{ color: "#fff" }}>
                       {formatCurrency(pendingQuote.owner_price ?? pendingQuote.suggested_high ?? pendingQuote.suggested_low)}
@@ -146,15 +539,15 @@ export function OwnerDashboard({ data, initialLanguage = "es" }: { data: OwnerPo
                 </div>
               ) : (
                 <p className="meta" style={{ color: "#ddefe5" }}>
-                  No pending quotes.
+                  {t.noPendingQuotes}
                 </p>
               )}
             </section>
           </div>
           <div className="grid three-col">
             <section className="card span-2">
-              <h2>AI Call Analytics</h2>
-              <div className="bar-chart" aria-label="Weekly AI call activity">
+              <h2>{t.aiCallAnalytics}</h2>
+              <div className="bar-chart" aria-label={t.weeklyAiCallActivity}>
                 {[58, 82, 68, 94, 76, 62, 88].map((height, index) => (
                   <div className="bar-column" key={index}>
                     <div className={index === 3 ? "bar active" : "bar"} style={{ height: `${height}%` }} />
@@ -164,9 +557,9 @@ export function OwnerDashboard({ data, initialLanguage = "es" }: { data: OwnerPo
               </div>
             </section>
             <section className="card tracker-card">
-              <h2>Ana Voice Agent</h2>
+              <h2>{t.anaVoiceAgent}</h2>
               <div className="timer">01:24:08</div>
-              <p>Live test window</p>
+              <p>{t.liveTestWindow}</p>
               <div className="toolbar">
                 <button className="round-control pause" type="button">II</button>
                 <button className="round-control stop" type="button">S</button>
@@ -176,12 +569,81 @@ export function OwnerDashboard({ data, initialLanguage = "es" }: { data: OwnerPo
         </div>
       ) : null}
 
-      {activeTab === "bookings" ? <BookingsTab jobs={data.jobs} /> : null}
-      {activeTab === "customers" ? <CustomersTab customers={data.customers} /> : null}
-      {activeTab === "quotes" ? <QuotesTab quotes={data.quotes} onAction={() => showToast(t.actionSent)} /> : null}
-      {activeTab === "messages" ? <MessagesTab data={data} /> : null}
-      {activeTab === "settings" ? (
-        <SettingsTab data={data} labels={t} onSave={() => showToast(t.saved)} />
+      {activeTab === "bookings" ? (
+        <BookingsTab
+          currentJobs={currentBookings}
+          labels={t}
+          onAddBooking={() => setIsBookingModalOpen(true)}
+          onDeleteBooking={handleBookingDeleted}
+          onEditBooking={(booking) => setEditBooking(booking)}
+          onOpenBooking={(booking) => setDetailBooking(booking)}
+          pastJobs={pastBookings}
+        />
+      ) : null}
+      {activeTab === "customers" ? (
+        <CustomersTab
+          customerServices={data.customerServices}
+          customers={data.customers}
+          labels={t}
+          onAddCustomer={() => setIsCustomerModalOpen(true)}
+          onDeleteCustomer={handleCustomerDeleted}
+          onEditCustomer={(customer) => setEditCustomer(customer)}
+          onOpenCustomer={(customer) => setDetailCustomer(customer)}
+        />
+      ) : null}
+      {activeTab === "quotes" ? <QuotesTab labels={t} quotes={data.quotes} onAction={() => showToast(t.actionSent)} /> : null}
+      {activeTab === "messages" ? <MessagesTab data={data} labels={t} /> : null}
+      {isBookingModalOpen ? (
+        <AddBookingModal
+          customers={data.customers}
+          labels={t}
+          onClose={() => setIsBookingModalOpen(false)}
+          onSuccess={handleBookingAdded}
+        />
+      ) : null}
+      {detailBooking ? (
+        <BookingDetailsModal
+          booking={detailBooking}
+          labels={t}
+          onClose={() => setDetailBooking(null)}
+          onEdit={() => {
+            setEditBooking(detailBooking);
+            setDetailBooking(null);
+          }}
+        />
+      ) : null}
+      {editBooking ? (
+        <EditBookingModal
+          booking={editBooking}
+          customers={data.customers}
+          labels={t}
+          onClose={() => setEditBooking(null)}
+          onSuccess={handleBookingAdded}
+        />
+      ) : null}
+      {isCustomerModalOpen ? (
+        <AddCustomerModal labels={t} onClose={() => setIsCustomerModalOpen(false)} onSuccess={handleCustomerAdded} />
+      ) : null}
+      {detailCustomer ? (
+        <CustomerDetailsModal
+          customer={detailCustomer}
+          labels={t}
+          onClose={() => setDetailCustomer(null)}
+          onEdit={() => {
+            setEditCustomer(detailCustomer);
+            setDetailCustomer(null);
+          }}
+          service={data.customerServices[detailCustomer.id]}
+        />
+      ) : null}
+      {editCustomer ? (
+        <EditCustomerModal
+          customer={editCustomer}
+          labels={t}
+          onClose={() => setEditCustomer(null)}
+          onSuccess={handleCustomerAdded}
+          service={data.customerServices[editCustomer.id]}
+        />
       ) : null}
       <Toast message={toast} />
     </>
@@ -215,7 +677,17 @@ function Stat({
   );
 }
 
-function JobList({ jobs, empty }: { jobs: OwnerPortalData["jobs"]; empty: string }) {
+function JobList({
+  jobs,
+  empty,
+  labels,
+  onOpenJob
+}: {
+  jobs: OwnerPortalData["jobs"];
+  empty: string;
+  labels: OwnerCopy;
+  onOpenJob: (job: Job) => void;
+}) {
   if (!jobs.length) return <div className="empty-state">{empty}</div>;
 
   return (
@@ -223,45 +695,120 @@ function JobList({ jobs, empty }: { jobs: OwnerPortalData["jobs"]; empty: string
       {jobs.map((job) => (
         <article className="row-card split" key={job.id}>
           <div>
-            <strong>{job.title}</strong>
-            <div className="meta">
-              {formatDateTime(job.scheduled_start)} - {customerName(job.customers)} - {job.address ?? "No address"}
+            <strong>{bookingTitleLabel(labels, job)}</strong>
+            <div className="meta agenda-job-meta">
+              <span>{formatDateTime(job.scheduled_start)}</span>
+              <span>{customerName(job.customers, labels.newCustomer)}</span>
+              <span>{job.address ?? labels.noAddress}</span>
             </div>
           </div>
-          <StatusPill status={job.status} />
+          <button className="icon-action-button agenda-view-button" onClick={() => onOpenJob(job)} type="button">
+            <EyeIcon />
+            <span>{labels.viewBooking}</span>
+          </button>
         </article>
       ))}
     </div>
   );
 }
 
-function BookingsTab({ jobs }: { jobs: OwnerPortalData["jobs"] }) {
+function BookingsTab({
+  currentJobs,
+  labels,
+  onAddBooking,
+  onDeleteBooking,
+  onEditBooking,
+  onOpenBooking,
+  pastJobs
+}: {
+  currentJobs: OwnerPortalData["jobs"];
+  labels: OwnerCopy;
+  onAddBooking: () => void;
+  onDeleteBooking: (booking: Job) => void;
+  onEditBooking: (booking: Job) => void;
+  onOpenBooking: (booking: Job) => void;
+  pastJobs: OwnerPortalData["jobs"];
+}) {
+  const [bookingView, setBookingView] = useState<BookingView>("current");
+  const visibleJobs = bookingView === "current" ? currentJobs : pastJobs;
+  const activeBookingLabel = bookingView === "current" ? labels.currentBookings : labels.pastBooking;
+  const subtitle = bookingView === "current" ? labels.addBookingSubtitle : labels.pastBookingSubtitle;
+
   return (
-    <section className="card">
-      <h2>Bookings</h2>
-      <div className="table-wrap">
-        <table className="table">
+    <section className="customer-directory">
+      <div className="customer-directory-header">
+        <div className="booking-header-copy">
+          <h2>{labels.bookings}</h2>
+          <p className="meta">{subtitle}</p>
+          <div className="booking-view-toggle" aria-label={labels.bookings}>
+            <button className={bookingView === "current" ? "active" : ""} onClick={() => setBookingView("current")} type="button">
+              {labels.currentBookings}
+            </button>
+            <button className={bookingView === "past" ? "active" : ""} onClick={() => setBookingView("past")} type="button">
+              {labels.pastBooking}
+            </button>
+          </div>
+        </div>
+        <div className="customer-directory-actions">
+          <div className="customer-count-badge">
+            <CalendarIcon />
+            <span>{activeBookingLabel}</span>
+            <strong>{visibleJobs.length}</strong>
+          </div>
+          <button className="button gold customer-add-button" onClick={onAddBooking} type="button">
+            <PlusIcon />
+            <span>{labels.addBooking}</span>
+          </button>
+        </div>
+      </div>
+      <div className="customer-table-wrap">
+        <table className="customer-table">
           <thead>
             <tr>
-              <th>Job</th>
-              <th>Customer</th>
-              <th>Schedule</th>
-              <th>Status</th>
-              <th>Value</th>
+              <th>{labels.job}</th>
+              <th>{labels.customer}</th>
+              <th>{labels.schedule}</th>
+              <th>{labels.address}</th>
+              <th>{labels.value}</th>
+              <th aria-label={labels.actions} className="action-column" />
             </tr>
           </thead>
           <tbody>
-            {jobs.map((job) => (
-              <tr key={job.id}>
-                <td>{job.title}</td>
-                <td>{customerName(job.customers)}</td>
-                <td>{formatDateTime(job.scheduled_start)}</td>
-                <td>
-                  <StatusPill status={job.status} />
+            {visibleJobs.length ? (
+              visibleJobs.map((job) => (
+                <tr key={job.id}>
+                  <td>
+                    <span className="customer-name">{bookingTitleLabel(labels, job)}</span>
+                  </td>
+                  <td>{customerName(job.customers, labels.newCustomer)}</td>
+                  <td>{formatDateTime(job.scheduled_start)}</td>
+                  <td>{job.address ?? labels.noAddress}</td>
+                  <td>{formatCurrency(job.final_value ?? job.estimated_value)}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="icon-action-button" onClick={() => onOpenBooking(job)} type="button">
+                        <EyeIcon />
+                        <span>{labels.viewBooking}</span>
+                      </button>
+                      <button className="icon-action-button edit" onClick={() => onEditBooking(job)} type="button">
+                        <PencilIcon />
+                        <span>{labels.editBooking}</span>
+                      </button>
+                      <button className="icon-action-button danger" onClick={() => onDeleteBooking(job)} type="button">
+                        <TrashIcon />
+                        <span>{labels.deleteBooking}</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={6}>
+                  <div className="empty-state">{labels.noJobs}</div>
                 </td>
-                <td>{formatCurrency(job.final_value ?? job.estimated_value)}</td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
@@ -269,29 +816,101 @@ function BookingsTab({ jobs }: { jobs: OwnerPortalData["jobs"] }) {
   );
 }
 
-function CustomersTab({ customers }: { customers: OwnerPortalData["customers"] }) {
+function CustomersTab({
+  customerServices,
+  customers,
+  labels,
+  onAddCustomer,
+  onDeleteCustomer,
+  onEditCustomer,
+  onOpenCustomer
+}: {
+  customerServices: OwnerPortalData["customerServices"];
+  customers: OwnerPortalData["customers"];
+  labels: OwnerCopy;
+  onAddCustomer: () => void;
+  onDeleteCustomer: (customer: Customer) => void;
+  onEditCustomer: (customer: Customer) => void;
+  onOpenCustomer: (customer: Customer) => void;
+}) {
+  const [sortDirection, setSortDirection] = useState<CustomerSort>("asc");
+  const sortedCustomers = useMemo(
+    () =>
+      [...customers].sort((first, second) => {
+        const result = first.full_name.localeCompare(second.full_name, undefined, { sensitivity: "base" });
+        return sortDirection === "asc" ? result : -result;
+      }),
+    [customers, sortDirection]
+  );
+
   return (
-    <section className="card">
-      <h2>Customers</h2>
-      <div className="table-wrap">
-        <table className="table">
+    <section className="customer-directory">
+      <div className="customer-directory-header">
+        <div>
+          <h2>{labels.customers}</h2>
+          <p className="meta">{labels.addCustomerSubtitle}</p>
+        </div>
+        <div className="customer-directory-actions">
+          <div className="customer-count-badge">
+            <UsersIcon />
+            <span>{labels.totalCustomer}</span>
+            <strong>{customers.length}</strong>
+          </div>
+          <button className="button gold customer-add-button" onClick={onAddCustomer} type="button">
+            <PlusIcon />
+            <span>{labels.addCustomer}</span>
+          </button>
+        </div>
+      </div>
+      <div className="customer-table-wrap">
+        <table className="customer-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Phone</th>
-              <th>Language</th>
-              <th>Source</th>
-              <th>Address</th>
+              <th>
+                <button
+                  className="column-sort-button"
+                  onClick={() => setSortDirection((current) => (current === "asc" ? "desc" : "asc"))}
+                  type="button"
+                >
+                  <span>{labels.name}</span>
+                  <SortIcon className={sortDirection === "desc" ? "desc" : ""} />
+                </button>
+              </th>
+              <th>{labels.phone}</th>
+              <th>{labels.service}</th>
+              <th>{labels.serviceFee}</th>
+              <th>{labels.language}</th>
+              <th>{labels.address}</th>
+              <th aria-label={labels.actions} className="action-column" />
             </tr>
           </thead>
           <tbody>
-            {customers.map((customer) => (
+            {sortedCustomers.map((customer) => (
               <tr key={customer.id}>
-                <td>{customer.full_name}</td>
-                <td>{customer.phone ?? "Missing"}</td>
-                <td>{customer.preferred_language}</td>
-                <td>{customer.referral_source ?? "Unknown"}</td>
-                <td>{customer.address ?? "No address"}</td>
+                <td>
+                  <span className="customer-name">{customer.full_name}</span>
+                </td>
+                <td>{customer.phone ?? labels.missing}</td>
+                <td>{serviceLabel(labels, customerServices[customer.id])}</td>
+                <td>{serviceFeeLabel(labels, customer.service_fee)}</td>
+                <td>{languageLabel(labels, customer.preferred_language)}</td>
+                <td>{customer.address ?? labels.noAddress}</td>
+                <td>
+                  <div className="row-actions">
+                    <button className="icon-action-button" onClick={() => onOpenCustomer(customer)} type="button">
+                      <EyeIcon />
+                      <span>{labels.viewCustomer}</span>
+                    </button>
+                    <button className="icon-action-button edit" onClick={() => onEditCustomer(customer)} type="button">
+                      <PencilIcon />
+                      <span>{labels.editCustomer}</span>
+                    </button>
+                    <button className="icon-action-button danger" onClick={() => onDeleteCustomer(customer)} type="button">
+                      <TrashIcon />
+                      <span>{labels.deleteCustomer}</span>
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -301,24 +920,24 @@ function CustomersTab({ customers }: { customers: OwnerPortalData["customers"] }
   );
 }
 
-function QuotesTab({ quotes, onAction }: { quotes: OwnerPortalData["quotes"]; onAction: () => void }) {
+function QuotesTab({ quotes, labels, onAction }: { quotes: OwnerPortalData["quotes"]; labels: OwnerCopy; onAction: () => void }) {
   return (
     <section className="card">
-      <h2>Quotes</h2>
+      <h2>{labels.quotes}</h2>
       <div className="list">
         {quotes.map((quote) => (
           <article className="row-card split" key={quote.id}>
             <div>
-              <strong>{customerName(quote.customers)}</strong>
+              <strong>{customerName(quote.customers, labels.newCustomer)}</strong>
               <div className="meta">
-                {quote.service_type ?? "Service"} - {formatCurrency(quote.suggested_low)} - {formatCurrency(quote.suggested_high)}
+                {quote.service_type ?? labels.service} - {formatCurrency(quote.suggested_low)} - {formatCurrency(quote.suggested_high)}
               </div>
-              <div className="meta">{quote.ai_observations ?? "No AI observations yet."}</div>
+              <div className="meta">{quote.ai_observations ?? labels.noAiObservations}</div>
             </div>
             <div className="toolbar">
-              <StatusPill status={quote.status} />
+              <StatusPill label={statusLabel(labels, quote.status)} status={quote.status} />
               <button className="button ghost" onClick={onAction} type="button">
-                Review
+                {labels.review}
               </button>
             </div>
           </article>
@@ -328,16 +947,16 @@ function QuotesTab({ quotes, onAction }: { quotes: OwnerPortalData["quotes"]; on
   );
 }
 
-function MessagesTab({ data }: { data: OwnerPortalData }) {
+function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
   return (
     <div className="grid two-col">
       <section className="card">
-        <h2>Messages</h2>
+        <h2>{labels.messages}</h2>
         <div className="list">
           {data.messages.map((message) => (
             <article className="row-card" key={message.id}>
               <strong>
-                {message.direction} - {message.channel} - {customerName(message.customers)}
+                {message.direction} - {message.channel} - {customerName(message.customers, labels.newCustomer)}
               </strong>
               <div className="meta">{message.body}</div>
             </article>
@@ -345,11 +964,11 @@ function MessagesTab({ data }: { data: OwnerPortalData }) {
         </div>
       </section>
       <section className="card">
-        <h2>AI summaries</h2>
+        <h2>{labels.aiSummaries}</h2>
         <div className="list">
           {data.summaries.map((summary) => (
             <article className="row-card" key={summary.id}>
-              <strong>{summary.action_needed ?? "Summary"}</strong>
+              <strong>{summary.action_needed ?? labels.summary}</strong>
               <div className="meta">{summary.summary}</div>
             </article>
           ))}
@@ -359,53 +978,613 @@ function MessagesTab({ data }: { data: OwnerPortalData }) {
   );
 }
 
-function SettingsTab({
-  data,
+function CustomerDetailsModal({
+  customer,
   labels,
-  onSave
+  onClose,
+  onEdit,
+  service
 }: {
-  data: OwnerPortalData;
-  labels: (typeof copy)["es"];
-  onSave: () => void;
+  customer: Customer;
+  labels: OwnerCopy;
+  onClose: () => void;
+  onEdit: () => void;
+  service?: string;
 }) {
+  const details = [
+    { label: labels.fullName, value: customer.full_name },
+    { label: labels.phone, value: customer.phone ?? labels.missing },
+    { label: labels.email, value: customer.email ?? labels.missing },
+    { label: labels.service, value: serviceLabel(labels, service) },
+    { label: labels.serviceFee, value: serviceFeeLabel(labels, customer.service_fee) },
+    { label: labels.preferredLanguage, value: languageLabel(labels, customer.preferred_language) },
+    { label: labels.source, value: sourceLabel(labels, customer.referral_source) },
+    { label: labels.address, value: customer.address ?? labels.noAddress },
+    { label: labels.notes, value: customer.notes ?? labels.noNotes, full: true }
+  ];
+
   return (
-    <section className="card">
-      <h2>{labels.businessSettings}</h2>
-      <div className="form-grid">
-        <label className="field">
-          <span>Business</span>
-          <input readOnly value={data.business.name} />
-        </label>
-        <label className="field">
-          <span>Trade</span>
-          <input readOnly value={data.business.trade} />
-        </label>
-        <label className="field">
-          <span>{labels.radius}</span>
-          <input readOnly value={`${data.radiusRule?.radius_miles ?? 30} miles`} />
-        </label>
-        <label className="field">
-          <span>AI voice</span>
-          <input readOnly value={data.business.ai_voice_name} />
-        </label>
-        <label className="field">
-          <span>{labels.plan}</span>
-          <input readOnly value={data.billing?.plan_name ?? "Growth"} />
-        </label>
-        <label className="field">
-          <span>{labels.paymentStatus}</span>
-          <input readOnly value={data.billing?.billing_status ?? "trial"} />
-        </label>
-        <label className="field full">
-          <span>{labels.billing}</span>
-          <textarea readOnly value={`${labels.nextDue}: ${data.billing?.next_payment_due_at ?? "Not set"}`} />
-        </label>
-      </div>
-      <div style={{ marginTop: 16 }}>
-        <button className="button primary" onClick={onSave} type="button">
-          Save settings
-        </button>
-      </div>
-    </section>
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        aria-labelledby="customer-details-title"
+        aria-modal="true"
+        className="modal-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="section-card-header">
+          <div>
+            <h2 id="customer-details-title">{labels.customerDetails}</h2>
+            <p className="meta">{customer.full_name}</p>
+          </div>
+          <div className="toolbar flush">
+            <button className="button ghost" onClick={onEdit} type="button">
+              {labels.editCustomer}
+            </button>
+            <button className="button ghost" onClick={onClose} type="button">
+              {labels.close}
+            </button>
+          </div>
+        </div>
+        <dl className="detail-grid">
+          {details.map((item) => (
+            <div className={item.full ? "full" : ""} key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </div>
+  );
+}
+
+function AddCustomerModal({
+  labels,
+  onClose,
+  onSuccess
+}: {
+  labels: OwnerCopy;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+}) {
+  const initialState: AddCustomerState = {};
+  const [state, formAction] = useActionState(addOwnerCustomer, initialState);
+
+  useEffect(() => {
+    if (state.success) {
+      onSuccess(state.success);
+    }
+  }, [onSuccess, state.success]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        aria-labelledby="add-customer-title"
+        aria-modal="true"
+        className="modal-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="section-card-header">
+          <div>
+            <h2 id="add-customer-title">{labels.addCustomerTitle}</h2>
+            <p className="meta">{labels.addCustomerSubtitle}</p>
+          </div>
+          <button className="button ghost" onClick={onClose} type="button">
+            {labels.cancel}
+          </button>
+        </div>
+        <form action={formAction} className="form-grid">
+          <label className="field">
+            <span>{labels.fullName}</span>
+            <input autoFocus name="fullName" required />
+          </label>
+          <label className="field">
+            <span>{labels.phone}</span>
+            <input name="phone" type="tel" />
+          </label>
+          <label className="field">
+            <span>{labels.email}</span>
+            <input name="email" type="email" />
+          </label>
+          <label className="field">
+            <span>{labels.service}</span>
+            <select defaultValue="landscaping" name="serviceType" required>
+              {serviceOptions.map((service: ServiceOption) => (
+                <option key={service} value={service}>
+                  {serviceLabel(labels, service)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.serviceFee}</span>
+            <div className="currency-input">
+              <span aria-hidden="true">$</span>
+              <input className="service-fee-input" inputMode="decimal" min="0" name="serviceFee" step="0.01" type="number" />
+            </div>
+          </label>
+          <label className="field">
+            <span>{labels.sourceQuestion}</span>
+            <select defaultValue="referral" name="referralSource" required>
+              {customerSourceOptions.map((source: CustomerSourceOption) => (
+                <option key={source} value={source}>
+                  {sourceLabel(labels, source)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.preferredLanguage}</span>
+            <select defaultValue="auto" name="preferredLanguage">
+              <option value="auto">{labels.autoDetect}</option>
+              <option value="es">{labels.spanish}</option>
+              <option value="en">{labels.english}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.address}</span>
+            <input name="address" />
+          </label>
+          <label className="field full">
+            <span>{labels.notes}</span>
+            <textarea name="notes" />
+          </label>
+          {state.error ? <p className="form-message error">{state.error}</p> : null}
+          <div className="form-actions">
+            <button className="button ghost" onClick={onClose} type="button">
+              {labels.cancel}
+            </button>
+            <AddCustomerSubmitButton labels={labels} />
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function AddBookingModal({
+  customers,
+  labels,
+  onClose,
+  onSuccess
+}: {
+  customers: OwnerPortalData["customers"];
+  labels: OwnerCopy;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+}) {
+  const initialState: AddBookingState = {};
+  const [state, formAction] = useActionState(addOwnerBooking, initialState);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id ?? "__new");
+  const isNewCustomer = selectedCustomerId === "__new";
+
+  useEffect(() => {
+    if (state.success) {
+      onSuccess(state.success);
+    }
+  }, [onSuccess, state.success]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        aria-labelledby="add-booking-title"
+        aria-modal="true"
+        className="modal-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="section-card-header">
+          <div>
+            <h2 id="add-booking-title">{labels.addBookingTitle}</h2>
+            <p className="meta">{labels.addBookingSubtitle}</p>
+          </div>
+          <button className="button ghost" onClick={onClose} type="button">
+            {labels.cancel}
+          </button>
+        </div>
+        <form action={formAction} className="form-grid">
+          <label className="field">
+            <span>{labels.chooseCustomer}</span>
+            <select name="customerId" onChange={(event) => setSelectedCustomerId(event.target.value)} value={selectedCustomerId}>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.full_name}
+                </option>
+              ))}
+              <option value="__new">{labels.newCustomerOption}</option>
+            </select>
+          </label>
+          {isNewCustomer ? (
+            <>
+              <label className="field">
+                <span>{labels.fullName}</span>
+                <input autoFocus name="fullName" required />
+              </label>
+              <label className="field">
+                <span>{labels.phone}</span>
+                <input name="phone" type="tel" />
+              </label>
+              <label className="field">
+                <span>{labels.email}</span>
+                <input name="email" type="email" />
+              </label>
+              <label className="field">
+                <span>{labels.preferredLanguage}</span>
+                <select defaultValue="auto" name="preferredLanguage">
+                  <option value="auto">{labels.autoDetect}</option>
+                  <option value="es">{labels.spanish}</option>
+                  <option value="en">{labels.english}</option>
+                </select>
+              </label>
+            </>
+          ) : null}
+          <label className="field">
+            <span>{labels.service}</span>
+            <select defaultValue="landscaping" name="serviceType" required>
+              {serviceOptions.map((service: ServiceOption) => (
+                <option key={service} value={service}>
+                  {serviceLabel(labels, service)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.bookingDate}</span>
+            <input name="scheduledStart" required type="datetime-local" />
+          </label>
+          <label className="field">
+            <span>{labels.bookingValue}</span>
+            <div className="currency-input">
+              <span aria-hidden="true">$</span>
+              <input className="service-fee-input" inputMode="decimal" min="0" name="estimatedValue" step="0.01" type="number" />
+            </div>
+          </label>
+          <label className="field full">
+            <span>{labels.bookingAddress}</span>
+            <input name="address" />
+          </label>
+          <label className="field full">
+            <span>{labels.notes}</span>
+            <textarea name="notes" />
+          </label>
+          {state.error ? <p className="form-message error">{state.error}</p> : null}
+          <div className="form-actions">
+            <button className="button ghost" onClick={onClose} type="button">
+              {labels.cancel}
+            </button>
+            <AddBookingSubmitButton labels={labels} />
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function BookingDetailsModal({
+  booking,
+  labels,
+  onClose,
+  onEdit
+}: {
+  booking: Job;
+  labels: OwnerCopy;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const details = [
+    { label: labels.job, value: bookingTitleLabel(labels, booking) },
+    { label: labels.customer, value: customerName(booking.customers, labels.newCustomer) },
+    { label: labels.service, value: serviceLabel(labels, booking.service_type) },
+    { label: labels.schedule, value: formatDateTime(booking.scheduled_start) },
+    { label: labels.address, value: booking.address ?? labels.noAddress },
+    { label: labels.value, value: formatCurrency(booking.final_value ?? booking.estimated_value) },
+    { label: labels.notes, value: booking.owner_notes ?? booking.ai_notes ?? labels.noNotes, full: true }
+  ];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        aria-labelledby="booking-details-title"
+        aria-modal="true"
+        className="modal-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="section-card-header">
+          <div>
+            <h2 id="booking-details-title">{labels.bookingDetails}</h2>
+            <p className="meta">{customerName(booking.customers, labels.newCustomer)}</p>
+          </div>
+          <div className="toolbar flush">
+            <button className="button ghost" onClick={onEdit} type="button">
+              {labels.editBooking}
+            </button>
+            <button className="button ghost" onClick={onClose} type="button">
+              {labels.close}
+            </button>
+          </div>
+        </div>
+        <dl className="detail-grid">
+          {details.map((item) => (
+            <div className={item.full ? "full" : ""} key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </div>
+  );
+}
+
+function EditBookingModal({
+  booking,
+  customers,
+  labels,
+  onClose,
+  onSuccess
+}: {
+  booking: Job;
+  customers: OwnerPortalData["customers"];
+  labels: OwnerCopy;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+}) {
+  const initialState: AddBookingState = {};
+  const [state, formAction] = useActionState(updateOwnerBooking, initialState);
+  const selectedCustomer = customers.some((customer) => customer.id === booking.customer_id) ? (booking.customer_id ?? "") : "";
+  const selectedService = serviceOptions.includes(booking.service_type as ServiceOption) ? (booking.service_type as ServiceOption) : "landscaping";
+
+  useEffect(() => {
+    if (state.success) {
+      onSuccess(state.success);
+    }
+  }, [onSuccess, state.success]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        aria-labelledby="edit-booking-title"
+        aria-modal="true"
+        className="modal-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="section-card-header">
+          <div>
+            <h2 id="edit-booking-title">{labels.editBookingTitle}</h2>
+            <p className="meta">{customerName(booking.customers, labels.newCustomer)}</p>
+          </div>
+          <button className="button ghost" onClick={onClose} type="button">
+            {labels.cancel}
+          </button>
+        </div>
+        <form action={formAction} className="form-grid">
+          <input name="bookingId" type="hidden" value={booking.id} />
+          <label className="field">
+            <span>{labels.chooseCustomer}</span>
+            <select defaultValue={selectedCustomer} name="customerId" required>
+              <option disabled value="">
+                {labels.chooseCustomer}
+              </option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.full_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.service}</span>
+            <select defaultValue={selectedService} name="serviceType" required>
+              {serviceOptions.map((service: ServiceOption) => (
+                <option key={service} value={service}>
+                  {serviceLabel(labels, service)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.bookingDate}</span>
+            <input defaultValue={toDateTimeLocalValue(booking.scheduled_start)} name="scheduledStart" required type="datetime-local" />
+          </label>
+          <label className="field">
+            <span>{labels.bookingValue}</span>
+            <div className="currency-input">
+              <span aria-hidden="true">$</span>
+              <input
+                className="service-fee-input"
+                defaultValue={booking.estimated_value ?? booking.final_value ?? ""}
+                inputMode="decimal"
+                min="0"
+                name="estimatedValue"
+                step="0.01"
+                type="number"
+              />
+            </div>
+          </label>
+          <label className="field full">
+            <span>{labels.bookingAddress}</span>
+            <input defaultValue={booking.address ?? ""} name="address" />
+          </label>
+          <label className="field full">
+            <span>{labels.notes}</span>
+            <textarea defaultValue={booking.owner_notes ?? ""} name="notes" />
+          </label>
+          {state.error ? <p className="form-message error">{state.error}</p> : null}
+          <div className="form-actions">
+            <button className="button ghost" onClick={onClose} type="button">
+              {labels.cancel}
+            </button>
+            <EditBookingSubmitButton labels={labels} />
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function EditCustomerModal({
+  customer,
+  labels,
+  onClose,
+  onSuccess,
+  service
+}: {
+  customer: Customer;
+  labels: OwnerCopy;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  service?: string;
+}) {
+  const initialState: AddCustomerState = {};
+  const [state, formAction] = useActionState(updateOwnerCustomer, initialState);
+  const selectedService = serviceOptions.includes(service as ServiceOption) ? (service as ServiceOption) : "landscaping";
+  const selectedLanguage = ["auto", "es", "en"].includes(customer.preferred_language) ? customer.preferred_language : "auto";
+  const selectedSource = customerSourceOptions.includes(customer.referral_source as CustomerSourceOption)
+    ? (customer.referral_source as CustomerSourceOption)
+    : "other";
+
+  useEffect(() => {
+    if (state.success) {
+      onSuccess(state.success);
+    }
+  }, [onSuccess, state.success]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        aria-labelledby="edit-customer-title"
+        aria-modal="true"
+        className="modal-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="section-card-header">
+          <div>
+            <h2 id="edit-customer-title">{labels.editCustomerTitle}</h2>
+            <p className="meta">{customer.full_name}</p>
+          </div>
+          <button className="button ghost" onClick={onClose} type="button">
+            {labels.cancel}
+          </button>
+        </div>
+        <form action={formAction} className="form-grid">
+          <input name="customerId" type="hidden" value={customer.id} />
+          <label className="field">
+            <span>{labels.fullName}</span>
+            <input autoFocus defaultValue={customer.full_name} name="fullName" required />
+          </label>
+          <label className="field">
+            <span>{labels.phone}</span>
+            <input defaultValue={customer.phone ?? ""} name="phone" type="tel" />
+          </label>
+          <label className="field">
+            <span>{labels.email}</span>
+            <input defaultValue={customer.email ?? ""} name="email" type="email" />
+          </label>
+          <label className="field">
+            <span>{labels.service}</span>
+            <select defaultValue={selectedService} name="serviceType" required>
+              {serviceOptions.map((serviceOption: ServiceOption) => (
+                <option key={serviceOption} value={serviceOption}>
+                  {serviceLabel(labels, serviceOption)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.serviceFee}</span>
+            <div className="currency-input">
+              <span aria-hidden="true">$</span>
+              <input
+                className="service-fee-input"
+                defaultValue={customer.service_fee ?? ""}
+                inputMode="decimal"
+                min="0"
+                name="serviceFee"
+                step="0.01"
+                type="number"
+              />
+            </div>
+          </label>
+          <label className="field">
+            <span>{labels.sourceQuestion}</span>
+            <select defaultValue={selectedSource} name="referralSource" required>
+              {customerSourceOptions.map((source: CustomerSourceOption) => (
+                <option key={source} value={source}>
+                  {sourceLabel(labels, source)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.preferredLanguage}</span>
+            <select defaultValue={selectedLanguage} name="preferredLanguage">
+              <option value="auto">{labels.autoDetect}</option>
+              <option value="es">{labels.spanish}</option>
+              <option value="en">{labels.english}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.address}</span>
+            <input defaultValue={customer.address ?? ""} name="address" />
+          </label>
+          <label className="field full">
+            <span>{labels.notes}</span>
+            <textarea defaultValue={customer.notes ?? ""} name="notes" />
+          </label>
+          {state.error ? <p className="form-message error">{state.error}</p> : null}
+          <div className="form-actions">
+            <button className="button ghost" onClick={onClose} type="button">
+              {labels.cancel}
+            </button>
+            <EditCustomerSubmitButton labels={labels} />
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function AddCustomerSubmitButton({ labels }: { labels: OwnerCopy }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="button primary" disabled={pending} type="submit">
+      {pending ? labels.saving : labels.saveCustomer}
+    </button>
+  );
+}
+
+function AddBookingSubmitButton({ labels }: { labels: OwnerCopy }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="button primary" disabled={pending} type="submit">
+      {pending ? labels.saving : labels.addBooking}
+    </button>
+  );
+}
+
+function EditBookingSubmitButton({ labels }: { labels: OwnerCopy }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="button primary" disabled={pending} type="submit">
+      {pending ? labels.updating : labels.updateBooking}
+    </button>
+  );
+}
+
+function EditCustomerSubmitButton({ labels }: { labels: OwnerCopy }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="button primary" disabled={pending} type="submit">
+      {pending ? labels.updating : labels.updateCustomer}
+    </button>
   );
 }

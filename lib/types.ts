@@ -53,6 +53,7 @@ export type Customer = {
   preferred_language: string;
   address: string | null;
   referral_source: string | null;
+  service_fee: number | null;
   notes: string | null;
 };
 
@@ -126,4 +127,3 @@ export type AiSummary = {
   confidence: number | null;
   created_at: string;
 };
-

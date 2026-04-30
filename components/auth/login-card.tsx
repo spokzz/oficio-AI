@@ -151,10 +151,11 @@ export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabe
           alt=""
           aria-hidden="true"
           className="auth-owners-image"
-          height={1318}
+          height={1086}
           priority
-          src="/auth/mexican-landscaping-owners-cutout-alpha.png"
-          width={765}
+          src="/auth/oficio-owners-hero-cutout.png"
+          unoptimized
+          width={1448}
         />
       </section>
 
@@ -174,6 +175,7 @@ export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabe
           <h1>{copy.welcome}</h1>
           <p className="subcopy">{copy.subtitle}</p>
           <form action={formAction} className="auth-form">
+            <input name="language" type="hidden" value={language} />
             <label>
               <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
             </label>

@@ -25,6 +25,7 @@ export type OwnerPortalData = {
   messages: Message[];
   calls: CallSession[];
   summaries: AiSummary[];
+  customerServices: Record<string, string>;
   metrics: {
     totalBookings: number;
     todayJobs: number;
@@ -79,8 +80,8 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
       .from("jobs")
       .select("*, customers(full_name, phone, preferred_language)")
       .eq("business_id", businessId)
-      .order("scheduled_start", { ascending: true })
-      .limit(12),
+      .order("scheduled_start", { ascending: false })
+      .limit(200),
     supabase.from("customers").select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(12),
     supabase
       .from("quotes")
@@ -106,13 +107,36 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
   if (!businessResult.data) redirect("/owner/no-business");
 
   const jobs = (jobsResult.data ?? []) as Job[];
+  const customers = (customersResult.data ?? []) as Customer[];
   const quotes = (quotesResult.data ?? []) as Quote[];
   const calls = (callsResult.data ?? []) as CallSession[];
+  const customerIds = customers.map((customer) => customer.id);
+  const customerServices: Record<string, string> = {};
+
+  if (customerIds.length) {
+    const { data: customerServiceRows } = await supabase
+      .from("jobs")
+      .select("customer_id,service_type,created_at")
+      .eq("business_id", businessId)
+      .in("customer_id", customerIds)
+      .not("service_type", "is", null)
+      .order("created_at", { ascending: false });
+
+    for (const row of customerServiceRows ?? []) {
+      const customerId = row.customer_id as string | null;
+      const serviceType = row.service_type as string | null;
+
+      if (customerId && serviceType && !customerServices[customerId]) {
+        customerServices[customerId] = serviceType;
+      }
+    }
+  }
   const { start, end } = todayRange();
+  const scheduledJobs = jobs.filter((job) => job.scheduled_start && job.status !== "canceled");
 
   const metrics = {
-    totalBookings: jobs.filter((job) => ["pending", "confirmed", "in_progress", "completed"].includes(job.status)).length,
-    todayJobs: jobs.filter((job) => job.scheduled_start && job.scheduled_start >= start && job.scheduled_start < end).length,
+    totalBookings: scheduledJobs.length,
+    todayJobs: scheduledJobs.filter((job) => job.scheduled_start && job.scheduled_start >= start && job.scheduled_start < end).length,
     revenue: jobs.reduce((sum, job) => sum + Number(job.final_value ?? job.estimated_value ?? 0), 0),
     recoveredCalls: calls.filter((call) => call.outcome?.toLowerCase().includes("book")).length,
     pendingQuotes: quotes.filter((quote) => quote.status === "needs_owner_approval" || quote.status === "draft").length
@@ -124,11 +148,12 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
     radiusRule: radiusResult.data ?? null,
     billing: billingResult.data ?? null,
     jobs,
-    customers: (customersResult.data ?? []) as Customer[],
+    customers,
     quotes,
     messages: (messagesResult.data ?? []) as Message[],
     calls,
     summaries: (summariesResult.data ?? []) as AiSummary[],
+    customerServices,
     metrics
   };
 }

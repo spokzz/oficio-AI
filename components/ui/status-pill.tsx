@@ -1,4 +1,4 @@
-export function StatusPill({ status }: { status: string }) {
+export function StatusPill({ status, label }: { status: string; label?: string }) {
   const normalized = status.replaceAll("_", " ");
   const tone =
     status.includes("confirmed") || status.includes("live") || status.includes("accepted")
@@ -9,6 +9,5 @@ export function StatusPill({ status }: { status: string }) {
           ? "danger"
           : "info";
 
-  return <span className={`pill ${tone}`}>{normalized}</span>;
+  return <span className={`pill ${tone}`}>{label ?? normalized}</span>;
 }
-

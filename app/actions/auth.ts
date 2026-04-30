@@ -10,6 +10,7 @@ type LoginState = {
 export async function signInOwner(_state: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const language = formData.get("language") === "es" ? "es" : "en";
 
   if (!email || !password) {
     return { error: "Please enter your email and password." };
@@ -22,7 +23,7 @@ export async function signInOwner(_state: LoginState, formData: FormData): Promi
     return { error: "Email or password is incorrect." };
   }
 
-  redirect("/owner");
+  redirect(`/owner?lang=${language}`);
 }
 
 export async function signInAdmin(_state: LoginState, formData: FormData): Promise<LoginState> {

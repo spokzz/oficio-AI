@@ -42,3 +42,42 @@ export function UsersIcon({ className }: IconProps) {
   );
 }
 
+export function PlusIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7V4Z" />
+    </svg>
+  );
+}
+
+export function EyeIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5c5.2 0 8.7 4.1 10 7-1.3 2.9-4.8 7-10 7S3.3 14.9 2 12c1.3-2.9 4.8-7 10-7Zm0 2C8.4 7 5.7 9.5 4.3 12c1.4 2.5 4.1 5 7.7 5s6.3-2.5 7.7-5C18.3 9.5 15.6 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" />
+    </svg>
+  );
+}
+
+export function PencilIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m4 16.8 10.9-10.9 3.2 3.2L7.2 20H4v-3.2Zm16.7-10.3-1.2 1.2-3.2-3.2 1.2-1.2a1.6 1.6 0 0 1 2.2 0l1 1a1.6 1.6 0 0 1 0 2.2Z" />
+    </svg>
+  );
+}
+
+export function TrashIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 3h6l1 2h5v2H3V5h5l1-2Zm-3 6h12l-.8 12H6.8L6 9Zm4 2v8h2v-8h-2Zm4 0v8h2v-8h-2Z" />
+    </svg>
+  );
+}
+
+export function SortIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m7 4 4 4H8v12H6V8H3l4-4Zm11 16-4-4h3V4h2v12h3l-4 4Z" />
+    </svg>
+  );
+}

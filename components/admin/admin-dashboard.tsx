@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useActionState, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { onboardOwner } from "@/app/actions/admin";
 import { CalendarIcon, DollarIcon, MessageIcon, UsersIcon } from "@/components/ui/icons";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency } from "@/lib/format";
@@ -37,7 +39,7 @@ export function AdminDashboard({ data }: { data: AdminPortalData }) {
       </div>
 
       {activeTab === "overview" ? <Overview data={data} /> : null}
-      {activeTab === "onboarding" ? <Onboarding onAction={() => showToast("Saved for demo. Next step is a server action.")} /> : null}
+      {activeTab === "onboarding" ? <Onboarding onQueuedCall={() => showToast("Test call queued for demo.")} /> : null}
       {activeTab === "accounts" ? <Accounts data={data} onAction={() => showToast("Account opened for review.")} /> : null}
       {activeTab === "usage" ? <Usage data={data} /> : null}
       {activeTab === "billing" ? <Billing data={data} onAction={() => showToast("Billing note saved for demo.")} /> : null}
@@ -131,23 +133,47 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
   );
 }
 
-function Onboarding({ onAction }: { onAction: () => void }) {
+function SaveSetupButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="button primary" disabled={pending} type="submit">
+      {pending ? "Saving..." : "Save setup"}
+    </button>
+  );
+}
+
+function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
+  const [state, formAction] = useActionState(onboardOwner, {});
+
   return (
     <div className="grid two-col">
       <section className="card">
         <h2>New Owner Setup</h2>
+        <form action={formAction}>
         <div className="form-grid">
+          <p className="meta full">
+            Leave password blank to link an existing Supabase Auth user. Add a temporary password to create a new Auth user.
+          </p>
           <label className="field">
             <span>Business name</span>
-            <input placeholder="Green Valley Landscaping" />
+            <input name="businessName" placeholder="Green Valley Landscaping" required />
+          </label>
+          <label className="field">
+            <span>Owner name</span>
+            <input name="ownerName" placeholder="Lowa Winter" />
           </label>
           <label className="field">
             <span>Owner email</span>
-            <input placeholder="owner@example.com" />
+            <input name="ownerEmail" placeholder="owner@example.com" required type="email" />
+          </label>
+          <label className="field">
+            <span>Temporary password</span>
+            <input name="ownerPassword" placeholder="At least 8 characters" type="password" />
           </label>
           <label className="field">
             <span>Trade</span>
-            <select defaultValue="landscaping">
+            <select defaultValue="landscaping" name="trade">
               <option value="landscaping">Landscaping</option>
               <option value="roofing">Roofing</option>
               <option value="plumbing">Plumbing</option>
@@ -156,7 +182,7 @@ function Onboarding({ onAction }: { onAction: () => void }) {
           </label>
           <label className="field">
             <span>Service radius</span>
-            <select defaultValue="30">
+            <select defaultValue="30" name="radiusMiles">
               <option value="15">15 miles</option>
               <option value="30">30 miles</option>
               <option value="45">45 miles</option>
@@ -164,17 +190,21 @@ function Onboarding({ onAction }: { onAction: () => void }) {
           </label>
           <label className="field full">
             <span>AI launch instructions</span>
-            <textarea defaultValue="Speak as Ana. Detect customer language. Summarize to owner in Spanish. Require owner approval before final quotes." />
+            <textarea
+              defaultValue="Speak as Ana. Detect customer language. Summarize to owner in Spanish. Require owner approval before final quotes."
+              name="aiInstructions"
+            />
           </label>
         </div>
+        {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
+        {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
         <div className="toolbar" style={{ marginTop: 16 }}>
-          <button className="button primary" onClick={onAction} type="button">
-            Save setup
-          </button>
-          <button className="button gold" onClick={onAction} type="button">
+          <SaveSetupButton />
+          <button className="button gold" onClick={onQueuedCall} type="button">
             Queue test call
           </button>
         </div>
+        </form>
       </section>
       <section className="card">
         <h2>Launch Checklist</h2>
