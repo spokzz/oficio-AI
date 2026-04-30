@@ -1365,7 +1365,7 @@ p {
   box-shadow: 0 12px 28px rgba(18, 42, 29, 0.05);
   display: grid;
   gap: 10px;
-  grid-template-columns: auto auto minmax(160px, 1fr);
+  grid-template-columns: auto minmax(160px, 1fr);
   min-height: 52px;
   padding: 10px 12px;
 }
@@ -1375,13 +1375,6 @@ p {
   fill: currentColor;
   height: 18px;
   width: 18px;
-}
-
-.directory-search-box span {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
 }
 
 .directory-search-box input {

@@ -767,9 +767,8 @@ function DirectorySearch({
 }) {
   return (
     <div className="directory-search-panel">
-      <label className="directory-search-box">
+      <label aria-label={label} className="directory-search-box">
         <SearchIcon />
-        <span>{label}</span>
         <input onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type="search" value={value} />
       </label>
       <div className="directory-search-summary" aria-live="polite">

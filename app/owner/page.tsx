@@ -102,7 +102,7 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
       badge={copy.badge}
       dateLabel={currentDateLabel(language)}
       eyebrow={data.business.name}
-      headerPlacement="topbar"
+      headerPlacement={activeTab === "home" ? "topbar" : "none"}
       nav={[
         { label: copy.nav.home, href: ownerHref(language, "home"), icon: "home", active: activeTab === "home" },
         { label: copy.nav.bookings, href: ownerHref(language, "bookings"), icon: "bookings", active: activeTab === "bookings" },
@@ -114,14 +114,16 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
       signOutLabel={copy.signOut}
       subtitle={copy.subtitle}
       topbarActions={
-        <div className="language-toggle portal-language-toggle" role="group" aria-label="Language">
-          <Link className={language === "es" ? "active" : ""} href={ownerHref("es", activeTab)}>
-            Español
-          </Link>
-          <Link className={language === "en" ? "active" : ""} href={ownerHref("en", activeTab)}>
-            English
-          </Link>
-        </div>
+        activeTab === "home" ? (
+          <div className="language-toggle portal-language-toggle" role="group" aria-label="Language">
+            <Link className={language === "es" ? "active" : ""} href={ownerHref("es", activeTab)}>
+              Español
+            </Link>
+            <Link className={language === "en" ? "active" : ""} href={ownerHref("en", activeTab)}>
+              English
+            </Link>
+          </div>
+        ) : null
       }
       title={`${currentGreeting(language)}, ${firstName}`}
     >

@@ -62,7 +62,7 @@ export function PortalShell({
   nav: NavItem[];
   children: ReactNode;
   badge?: string;
-  headerPlacement?: "below" | "topbar";
+  headerPlacement?: "below" | "none" | "topbar";
   searchLabel?: string;
   searchPlaceholder?: string;
   showSearch?: boolean;
@@ -70,6 +70,8 @@ export function PortalShell({
   topbarActions?: ReactNode;
 }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const shouldShowSearch = headerPlacement !== "topbar" && showSearch;
+  const shouldShowTopbar = headerPlacement === "topbar" || shouldShowSearch || Boolean(topbarActions);
   const headerContent = (
     <div className="portal-heading">
       <div className="portal-heading-meta">
@@ -130,20 +132,20 @@ export function PortalShell({
         </form>
       </aside>
       <main className="portal-main">
-        <div className={`portal-topbar ${headerPlacement === "topbar" ? "with-header" : ""}`}>
-          {headerPlacement === "topbar" ? (
-            <div className="topbar-header">{headerContent}</div>
-          ) : showSearch ? (
-            <label className="search-shell" aria-label="Search">
-              <span aria-hidden="true">{searchLabel}</span>
-              <input placeholder={searchPlaceholder} />
-              <kbd>Cmd F</kbd>
-            </label>
-          ) : null}
-          <div className="topbar-actions">
-            {topbarActions}
+        {shouldShowTopbar ? (
+          <div className={`portal-topbar ${headerPlacement === "topbar" ? "with-header" : ""}`}>
+            {headerPlacement === "topbar" ? (
+              <div className="topbar-header">{headerContent}</div>
+            ) : shouldShowSearch ? (
+              <label className="search-shell" aria-label="Search">
+                <span aria-hidden="true">{searchLabel}</span>
+                <input placeholder={searchPlaceholder} />
+                <kbd>Cmd F</kbd>
+              </label>
+            ) : null}
+            {topbarActions ? <div className="topbar-actions">{topbarActions}</div> : null}
           </div>
-        </div>
+        ) : null}
         {headerPlacement === "below" ? <header className="portal-header">{headerContent}</header> : null}
         {children}
       </main>
