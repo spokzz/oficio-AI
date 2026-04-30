@@ -13,7 +13,7 @@ Oficio AI helps Spanish-speaking business owners answer calls and texts in the c
 - `lib` - Supabase clients, server data loaders, types, and formatting helpers
 - `components` - reusable portal, auth, owner, and admin UI
 - `supabase` - schema migration and optional seed SQL
-- `apps`, `shared`, and `server` - archived static prototype kept for reference
+- `shared` - legacy business-logic fixtures used by `npm test`
 
 ## Run Locally
 
@@ -88,8 +88,8 @@ The Next.js app now reads core dashboard data from Supabase through authenticate
 
 Logo files:
 
-- `shared/assets/oficio-ai-logo.svg`
-- `shared/assets/oficio-ai-mark.svg`
+- `public/brand/oficio-ai-logo.svg`
+- `public/brand/oficio-ai-mark.svg`
 
 Palette:
 

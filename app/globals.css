@@ -111,12 +111,6 @@ p {
   color: var(--green-950);
 }
 
-.button.compact {
-  min-height: 36px;
-  padding: 8px 12px;
-  white-space: nowrap;
-}
-
 .auth-page {
   background: var(--white);
   border-radius: 52px;
@@ -911,20 +905,6 @@ p {
   margin-left: auto;
 }
 
-.icon-button {
-  align-items: center;
-  background: var(--white);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--green-950);
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 900;
-  height: 46px;
-  justify-content: center;
-  width: 46px;
-}
-
 .portal-header {
   align-items: flex-start;
   display: flex;
@@ -1182,17 +1162,6 @@ p {
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-
-.table-link {
-  background: transparent;
-  border: 0;
-  color: var(--orange-700);
-  font-weight: 900;
-  padding: 0;
-  text-align: left;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .customer-directory {

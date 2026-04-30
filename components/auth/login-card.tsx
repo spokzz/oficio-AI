@@ -71,23 +71,6 @@ const loginCopy = {
       signupText: "Need admin access?",
       signup: "Contact owner",
       helper: "Admin access requires your user role to be platform_admin."
-    },
-    es: {
-      heroTitle: "Configura negocios con confianza.",
-      heroBody: "Crea cuentas, revisa uso y deja cada negocio listo para recibir llamadas.",
-      welcome: "Bienvenido",
-      subtitle: "Inicia sesión en tu cuenta admin",
-      email: "Correo electrónico",
-      password: "Contraseña",
-      forgot: "¿Olvidaste tu contraseña?",
-      submit: "Entrar",
-      pending: "Entrando...",
-      divider: "O entra con",
-      google: "Google",
-      facebook: "Facebook",
-      signupText: "¿Necesitas acceso admin?",
-      signup: "Contacta al dueño",
-      helper: "El acceso admin requiere que tu usuario sea platform_admin."
     }
   }
 };
@@ -129,14 +112,14 @@ function HeroTitle({ language, variant }: { language: LoginLanguage; variant: "o
     );
   }
 
-  return <>{loginCopy[variant][language].heroTitle}</>;
+  return <>{loginCopy.admin.en.heroTitle}</>;
 }
 
 export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabel, variant = "owner", children }: LoginCardProps) {
   const [language, setLanguage] = useState<LoginLanguage>("en");
   const [showPassword, setShowPassword] = useState(false);
   const [state, formAction] = useActionState(action, {});
-  const copy = loginCopy[variant][language];
+  const copy = variant === "admin" ? loginCopy.admin.en : loginCopy.owner[language];
 
   return (
     <main className="auth-page">
@@ -160,14 +143,16 @@ export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabe
       </section>
 
       <section className="auth-panel">
-        <div className="login-language-toggle" role="group" aria-label="Login language">
-          <button className={language === "es" ? "active" : ""} onClick={() => setLanguage("es")} type="button">
-            Español
-          </button>
-          <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")} type="button">
-            English
-          </button>
-        </div>
+        {variant === "owner" ? (
+          <div className="login-language-toggle" role="group" aria-label="Login language">
+            <button className={language === "es" ? "active" : ""} onClick={() => setLanguage("es")} type="button">
+              Español
+            </button>
+            <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")} type="button">
+              English
+            </button>
+          </div>
+        ) : null}
         <div className="auth-card">
           <div className="auth-logo-row">
             <Image alt="Oficio AI" height={54} priority src="/brand/oficio-ai-logo.svg" width={240} />
@@ -175,7 +160,7 @@ export function LoginCard({ title, eyebrow, subtitle, helper, action, submitLabe
           <h1>{copy.welcome}</h1>
           <p className="subcopy">{copy.subtitle}</p>
           <form action={formAction} className="auth-form">
-            <input name="language" type="hidden" value={language} />
+            {variant === "owner" ? <input name="language" type="hidden" value={language} /> : null}
             <label>
               <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
             </label>

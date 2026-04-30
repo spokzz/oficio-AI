@@ -8,19 +8,9 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency } from "@/lib/format";
 import type { AdminPortalData } from "@/lib/admin-data";
 
-type AdminTab = "overview" | "onboarding" | "accounts" | "usage" | "billing" | "playbook";
+export type AdminTab = "overview" | "onboarding" | "accounts" | "usage" | "billing" | "playbook";
 
-const tabLabels: Record<AdminTab, string> = {
-  overview: "Overview",
-  onboarding: "Onboarding",
-  accounts: "Accounts",
-  usage: "Usage",
-  billing: "Billing",
-  playbook: "AI Playbook"
-};
-
-export function AdminDashboard({ data }: { data: AdminPortalData }) {
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; activeTab: AdminTab }) {
   const [toast, setToast] = useState<string | null>(null);
 
   function showToast(message: string) {
@@ -30,14 +20,6 @@ export function AdminDashboard({ data }: { data: AdminPortalData }) {
 
   return (
     <>
-      <div className="toolbar" style={{ marginBottom: 18 }}>
-        {(Object.keys(tabLabels) as AdminTab[]).map((tab) => (
-          <button className={`button ${activeTab === tab ? "gold" : "ghost"}`} key={tab} onClick={() => setActiveTab(tab)} type="button">
-            {tabLabels[tab]}
-          </button>
-        ))}
-      </div>
-
       {activeTab === "overview" ? <Overview data={data} /> : null}
       {activeTab === "onboarding" ? <Onboarding onQueuedCall={() => showToast("Test call queued for demo.")} /> : null}
       {activeTab === "accounts" ? <Accounts data={data} onAction={() => showToast("Account opened for review.")} /> : null}
@@ -151,59 +133,59 @@ function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
       <section className="card">
         <h2>New Owner Setup</h2>
         <form action={formAction}>
-        <div className="form-grid">
-          <p className="meta full">
-            Leave password blank to link an existing Supabase Auth user. Add a temporary password to create a new Auth user.
-          </p>
-          <label className="field">
-            <span>Business name</span>
-            <input name="businessName" placeholder="Green Valley Landscaping" required />
-          </label>
-          <label className="field">
-            <span>Owner name</span>
-            <input name="ownerName" placeholder="Lowa Winter" />
-          </label>
-          <label className="field">
-            <span>Owner email</span>
-            <input name="ownerEmail" placeholder="owner@example.com" required type="email" />
-          </label>
-          <label className="field">
-            <span>Temporary password</span>
-            <input name="ownerPassword" placeholder="At least 8 characters" type="password" />
-          </label>
-          <label className="field">
-            <span>Trade</span>
-            <select defaultValue="landscaping" name="trade">
-              <option value="landscaping">Landscaping</option>
-              <option value="roofing">Roofing</option>
-              <option value="plumbing">Plumbing</option>
-              <option value="cleaning">Cleaning</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Service radius</span>
-            <select defaultValue="30" name="radiusMiles">
-              <option value="15">15 miles</option>
-              <option value="30">30 miles</option>
-              <option value="45">45 miles</option>
-            </select>
-          </label>
-          <label className="field full">
-            <span>AI launch instructions</span>
-            <textarea
-              defaultValue="Speak as Ana. Detect customer language. Summarize to owner in Spanish. Require owner approval before final quotes."
-              name="aiInstructions"
-            />
-          </label>
-        </div>
-        {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
-        {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
-        <div className="toolbar" style={{ marginTop: 16 }}>
-          <SaveSetupButton />
-          <button className="button gold" onClick={onQueuedCall} type="button">
-            Queue test call
-          </button>
-        </div>
+          <div className="form-grid">
+            <p className="meta full">
+              Leave password blank to link an existing Supabase Auth user. Add a temporary password to create a new Auth user.
+            </p>
+            <label className="field">
+              <span>Business name</span>
+              <input name="businessName" placeholder="Green Valley Landscaping" required />
+            </label>
+            <label className="field">
+              <span>Owner name</span>
+              <input name="ownerName" placeholder="Lowa Winter" />
+            </label>
+            <label className="field">
+              <span>Owner email</span>
+              <input name="ownerEmail" placeholder="owner@example.com" required type="email" />
+            </label>
+            <label className="field">
+              <span>Temporary password</span>
+              <input name="ownerPassword" placeholder="At least 8 characters" type="password" />
+            </label>
+            <label className="field">
+              <span>Trade</span>
+              <select defaultValue="landscaping" name="trade">
+                <option value="landscaping">Landscaping</option>
+                <option value="roofing">Roofing</option>
+                <option value="plumbing">Plumbing</option>
+                <option value="cleaning">Cleaning</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Service radius</span>
+              <select defaultValue="30" name="radiusMiles">
+                <option value="15">15 miles</option>
+                <option value="30">30 miles</option>
+                <option value="45">45 miles</option>
+              </select>
+            </label>
+            <label className="field full">
+              <span>AI launch instructions</span>
+              <textarea
+                defaultValue="Speak as Ana. Use English for customer conversations and owner summaries. Require owner approval before final quotes."
+                name="aiInstructions"
+              />
+            </label>
+          </div>
+          {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
+          {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
+          <div className="toolbar" style={{ marginTop: 16 }}>
+            <SaveSetupButton />
+            <button className="button gold" onClick={onQueuedCall} type="button">
+              Queue test call
+            </button>
+          </div>
         </form>
       </section>
       <section className="card">
@@ -301,8 +283,8 @@ function Playbook({ onAction }: { onAction: () => void }) {
       <h2>AI Playbook</h2>
       <div className="grid three-col">
         <article className="row-card">
-          <strong>Multilingual answer</strong>
-          <div className="meta">Detect language, continue naturally, disclose AI, and collect job details.</div>
+          <strong>English answer</strong>
+          <div className="meta">Answer in English, disclose AI, and collect job details clearly.</div>
         </article>
         <article className="row-card">
           <strong>Quote approval</strong>
@@ -316,7 +298,7 @@ function Playbook({ onAction }: { onAction: () => void }) {
       <div className="form-grid" style={{ marginTop: 18 }}>
         <label className="field full">
           <span>Default AI instructions</span>
-          <textarea defaultValue="Speak as Ana, a warm AI receptionist. Handle English, Spanish, Hindi, Punjabi, Urdu, Gujarati, Arabic, Mandarin, Vietnamese, and other major languages. Ask service-specific questions. Check service radius. Request photos when helpful. Summarize to owner in Spanish. Never finalize a quote without approval." />
+          <textarea defaultValue="Speak as Ana, a warm AI receptionist. Use English for customer conversations and owner summaries. Ask service-specific questions. Check service radius. Request photos when helpful. Never finalize a quote without approval." />
         </label>
       </div>
       <button className="button primary" onClick={onAction} style={{ marginTop: 16 }} type="button">

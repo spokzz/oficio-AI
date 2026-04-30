@@ -90,7 +90,7 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
       id: ownerId,
       email: ownerEmail,
       full_name: ownerName || null,
-      preferred_language: "es",
+      preferred_language: "en",
       role: "owner"
     });
 
@@ -105,7 +105,7 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
       name: businessName,
       trade,
       status: "onboarding",
-      owner_summary_language: "es",
+      owner_summary_language: "en",
       ai_voice_name: "Ana",
       ai_disclosure: aiInstructions || "Hi, this is Ana, the AI assistant for this business. How can I help?"
     })
@@ -120,7 +120,7 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
 
   const { error: profileError } = await supabase
     .from("users")
-    .update({ full_name: ownerName || null, role: "owner", preferred_language: "es" })
+    .update({ full_name: ownerName || null, role: "owner", preferred_language: "en" })
     .eq("id", ownerId);
 
   if (profileError) {
