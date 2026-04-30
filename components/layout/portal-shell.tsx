@@ -48,8 +48,10 @@ export function PortalShell({
   nav,
   children,
   badge,
+  headerPlacement = "below",
   searchLabel = "Search",
   searchPlaceholder = "Search customers, jobs, quotes",
+  showSearch = true,
   signOutLabel = "Sign out",
   topbarActions
 }: {
@@ -60,12 +62,24 @@ export function PortalShell({
   nav: NavItem[];
   children: ReactNode;
   badge?: string;
+  headerPlacement?: "below" | "topbar";
   searchLabel?: string;
   searchPlaceholder?: string;
+  showSearch?: boolean;
   signOutLabel?: string;
   topbarActions?: ReactNode;
 }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const headerContent = (
+    <div className="portal-heading">
+      <div className="portal-heading-meta">
+        <div className="eyebrow">{eyebrow}</div>
+        {dateLabel ? <p className="portal-date">{dateLabel}</p> : null}
+      </div>
+      <h1>{title}</h1>
+      <p className="subcopy">{subtitle}</p>
+    </div>
+  );
 
   return (
     <div className={`portal-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -116,24 +130,21 @@ export function PortalShell({
         </form>
       </aside>
       <main className="portal-main">
-        <div className="portal-topbar">
-          <label className="search-shell" aria-label="Search">
-            <span aria-hidden="true">{searchLabel}</span>
-            <input placeholder={searchPlaceholder} />
-            <kbd>Cmd F</kbd>
-          </label>
+        <div className={`portal-topbar ${headerPlacement === "topbar" ? "with-header" : ""}`}>
+          {headerPlacement === "topbar" ? (
+            <div className="topbar-header">{headerContent}</div>
+          ) : showSearch ? (
+            <label className="search-shell" aria-label="Search">
+              <span aria-hidden="true">{searchLabel}</span>
+              <input placeholder={searchPlaceholder} />
+              <kbd>Cmd F</kbd>
+            </label>
+          ) : null}
           <div className="topbar-actions">
             {topbarActions}
           </div>
         </div>
-        <header className="portal-header">
-          <div>
-            <div className="eyebrow">{eyebrow}</div>
-            <h1>{title}</h1>
-            {dateLabel ? <p className="portal-date">{dateLabel}</p> : null}
-            <p className="subcopy">{subtitle}</p>
-          </div>
-        </header>
+        {headerPlacement === "below" ? <header className="portal-header">{headerContent}</header> : null}
         {children}
       </main>
     </div>

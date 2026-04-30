@@ -21,6 +21,7 @@ import {
   MessageIcon,
   PencilIcon,
   PlusIcon,
+  SearchIcon,
   SortIcon,
   TrashIcon,
   UsersIcon
@@ -54,6 +55,7 @@ const copy = {
     agenda: "Agenda de hoy",
     pendingQuote: "Cotización para aprobar",
     noJobs: "No hay trabajos todavía.",
+    noCustomers: "No hay clientes todavía.",
     approve: "Aprobar",
     edit: "Editar precio",
     photos: "Pedir fotos",
@@ -127,6 +129,15 @@ const copy = {
     newCustomerOption: "Cliente nuevo",
     totalCustomer: "Total cliente",
     saveCustomer: "Guardar cliente",
+    searchBookings: "Buscar reservas",
+    searchCustomers: "Buscar clientes",
+    searchBookingPlaceholder: "Buscar por cliente o dirección",
+    searchCustomerPlaceholder: "Buscar por nombre o dirección",
+    matchingResults: "resultados",
+    of: "de",
+    clearSearch: "Limpiar",
+    noMatchingBookings: "No hay reservas que coincidan con esa búsqueda.",
+    noMatchingCustomers: "No hay clientes que coincidan con esa búsqueda.",
     saving: "Guardando...",
     updateCustomer: "Actualizar cliente",
     updating: "Actualizando...",
@@ -182,6 +193,7 @@ const copy = {
     agenda: "Today's agenda",
     pendingQuote: "Quote to approve",
     noJobs: "No jobs yet.",
+    noCustomers: "No customers yet.",
     approve: "Approve",
     edit: "Edit price",
     photos: "Ask for photos",
@@ -255,6 +267,15 @@ const copy = {
     newCustomerOption: "New customer",
     totalCustomer: "Total customer",
     saveCustomer: "Save customer",
+    searchBookings: "Search bookings",
+    searchCustomers: "Search customers",
+    searchBookingPlaceholder: "Search by customer or address",
+    searchCustomerPlaceholder: "Search by name or address",
+    matchingResults: "results",
+    of: "of",
+    clearSearch: "Clear",
+    noMatchingBookings: "No bookings match that search.",
+    noMatchingCustomers: "No customers match that search.",
     saving: "Saving...",
     updateCustomer: "Update customer",
     updating: "Updating...",
@@ -344,6 +365,17 @@ function serviceFeeLabel(labels: OwnerCopy, fee?: number | null) {
     minimumFractionDigits: value % 1 === 0 ? 0 : 2,
     style: "currency"
   }).format(value);
+}
+
+function normalizedSearch(value?: string | null) {
+  return (value ?? "").trim().toLocaleLowerCase();
+}
+
+function matchesSearch(query: string, ...values: Array<string | null | undefined>) {
+  const normalizedQuery = normalizedSearch(query);
+  if (!normalizedQuery) return true;
+
+  return values.some((value) => normalizedSearch(value).includes(normalizedQuery));
 }
 
 function isTodayJob(job: OwnerPortalData["jobs"][number]) {
@@ -712,6 +744,49 @@ function JobList({
   );
 }
 
+function DirectorySearch({
+  clearLabel,
+  count,
+  label,
+  ofLabel,
+  onChange,
+  placeholder,
+  resultsLabel,
+  total,
+  value
+}: {
+  clearLabel: string;
+  count: number;
+  label: string;
+  ofLabel: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  resultsLabel: string;
+  total: number;
+  value: string;
+}) {
+  return (
+    <div className="directory-search-panel">
+      <label className="directory-search-box">
+        <SearchIcon />
+        <span>{label}</span>
+        <input onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type="search" value={value} />
+      </label>
+      <div className="directory-search-summary" aria-live="polite">
+        <strong>{count}</strong>
+        <span>
+          {ofLabel} {total} {resultsLabel}
+        </span>
+      </div>
+      {value ? (
+        <button className="directory-search-clear" onClick={() => onChange("")} type="button">
+          {clearLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function BookingsTab({
   currentJobs,
   labels,
@@ -730,7 +805,12 @@ function BookingsTab({
   pastJobs: OwnerPortalData["jobs"];
 }) {
   const [bookingView, setBookingView] = useState<BookingView>("current");
+  const [searchQuery, setSearchQuery] = useState("");
   const visibleJobs = bookingView === "current" ? currentJobs : pastJobs;
+  const filteredJobs = useMemo(
+    () => visibleJobs.filter((job) => matchesSearch(searchQuery, job.customers?.full_name, job.address, job.customers?.address)),
+    [searchQuery, visibleJobs]
+  );
   const activeBookingLabel = bookingView === "current" ? labels.currentBookings : labels.pastBooking;
   const subtitle = bookingView === "current" ? labels.addBookingSubtitle : labels.pastBookingSubtitle;
 
@@ -761,6 +841,17 @@ function BookingsTab({
           </button>
         </div>
       </div>
+      <DirectorySearch
+        clearLabel={labels.clearSearch}
+        count={filteredJobs.length}
+        label={labels.searchBookings}
+        ofLabel={labels.of}
+        onChange={setSearchQuery}
+        placeholder={labels.searchBookingPlaceholder}
+        resultsLabel={labels.matchingResults}
+        total={visibleJobs.length}
+        value={searchQuery}
+      />
       <div className="customer-table-wrap">
         <table className="customer-table">
           <thead>
@@ -774,8 +865,8 @@ function BookingsTab({
             </tr>
           </thead>
           <tbody>
-            {visibleJobs.length ? (
-              visibleJobs.map((job) => (
+            {filteredJobs.length ? (
+              filteredJobs.map((job) => (
                 <tr key={job.id}>
                   <td>
                     <span className="customer-name">{bookingTitleLabel(labels, job)}</span>
@@ -805,7 +896,7 @@ function BookingsTab({
             ) : (
               <tr>
                 <td colSpan={6}>
-                  <div className="empty-state">{labels.noJobs}</div>
+                  <div className="empty-state">{visibleJobs.length ? labels.noMatchingBookings : labels.noJobs}</div>
                 </td>
               </tr>
             )}
@@ -834,13 +925,16 @@ function CustomersTab({
   onOpenCustomer: (customer: Customer) => void;
 }) {
   const [sortDirection, setSortDirection] = useState<CustomerSort>("asc");
+  const [searchQuery, setSearchQuery] = useState("");
   const sortedCustomers = useMemo(
     () =>
-      [...customers].sort((first, second) => {
-        const result = first.full_name.localeCompare(second.full_name, undefined, { sensitivity: "base" });
-        return sortDirection === "asc" ? result : -result;
-      }),
-    [customers, sortDirection]
+      customers
+        .filter((customer) => matchesSearch(searchQuery, customer.full_name, customer.address))
+        .sort((first, second) => {
+          const result = first.full_name.localeCompare(second.full_name, undefined, { sensitivity: "base" });
+          return sortDirection === "asc" ? result : -result;
+        }),
+    [customers, searchQuery, sortDirection]
   );
 
   return (
@@ -862,6 +956,17 @@ function CustomersTab({
           </button>
         </div>
       </div>
+      <DirectorySearch
+        clearLabel={labels.clearSearch}
+        count={sortedCustomers.length}
+        label={labels.searchCustomers}
+        ofLabel={labels.of}
+        onChange={setSearchQuery}
+        placeholder={labels.searchCustomerPlaceholder}
+        resultsLabel={labels.matchingResults}
+        total={customers.length}
+        value={searchQuery}
+      />
       <div className="customer-table-wrap">
         <table className="customer-table">
           <thead>
@@ -885,34 +990,42 @@ function CustomersTab({
             </tr>
           </thead>
           <tbody>
-            {sortedCustomers.map((customer) => (
-              <tr key={customer.id}>
-                <td>
-                  <span className="customer-name">{customer.full_name}</span>
-                </td>
-                <td>{customer.phone ?? labels.missing}</td>
-                <td>{serviceLabel(labels, customerServices[customer.id])}</td>
-                <td>{serviceFeeLabel(labels, customer.service_fee)}</td>
-                <td>{languageLabel(labels, customer.preferred_language)}</td>
-                <td>{customer.address ?? labels.noAddress}</td>
-                <td>
-                  <div className="row-actions">
-                    <button className="icon-action-button" onClick={() => onOpenCustomer(customer)} type="button">
-                      <EyeIcon />
-                      <span>{labels.viewCustomer}</span>
-                    </button>
-                    <button className="icon-action-button edit" onClick={() => onEditCustomer(customer)} type="button">
-                      <PencilIcon />
-                      <span>{labels.editCustomer}</span>
-                    </button>
-                    <button className="icon-action-button danger" onClick={() => onDeleteCustomer(customer)} type="button">
-                      <TrashIcon />
-                      <span>{labels.deleteCustomer}</span>
-                    </button>
-                  </div>
+            {sortedCustomers.length ? (
+              sortedCustomers.map((customer) => (
+                <tr key={customer.id}>
+                  <td>
+                    <span className="customer-name">{customer.full_name}</span>
+                  </td>
+                  <td>{customer.phone ?? labels.missing}</td>
+                  <td>{serviceLabel(labels, customerServices[customer.id])}</td>
+                  <td>{serviceFeeLabel(labels, customer.service_fee)}</td>
+                  <td>{languageLabel(labels, customer.preferred_language)}</td>
+                  <td>{customer.address ?? labels.noAddress}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="icon-action-button" onClick={() => onOpenCustomer(customer)} type="button">
+                        <EyeIcon />
+                        <span>{labels.viewCustomer}</span>
+                      </button>
+                      <button className="icon-action-button edit" onClick={() => onEditCustomer(customer)} type="button">
+                        <PencilIcon />
+                        <span>{labels.editCustomer}</span>
+                      </button>
+                      <button className="icon-action-button danger" onClick={() => onDeleteCustomer(customer)} type="button">
+                        <TrashIcon />
+                        <span>{labels.deleteCustomer}</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7}>
+                  <div className="empty-state">{customers.length ? labels.noMatchingCustomers : labels.noCustomers}</div>
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>

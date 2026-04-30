@@ -30,8 +30,6 @@ const ownerShellCopy = {
       quotes: "Cotizaciones",
       messages: "Mensajes"
     },
-    searchLabel: "Buscar",
-    searchPlaceholder: "Buscar clientes, trabajos, cotizaciones",
     signOut: "Cerrar sesión",
     subtitle: "Tu recepcionista AI está tomando llamadas, textos y solicitudes de cotización."
   },
@@ -49,8 +47,6 @@ const ownerShellCopy = {
       quotes: "Quotes",
       messages: "Messages"
     },
-    searchLabel: "Search",
-    searchPlaceholder: "Search customers, jobs, quotes",
     signOut: "Sign out",
     subtitle: "Your AI receptionist is taking calls, texts, and quote requests."
   }
@@ -106,6 +102,7 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
       badge={copy.badge}
       dateLabel={currentDateLabel(language)}
       eyebrow={data.business.name}
+      headerPlacement="topbar"
       nav={[
         { label: copy.nav.home, href: ownerHref(language, "home"), icon: "home", active: activeTab === "home" },
         { label: copy.nav.bookings, href: ownerHref(language, "bookings"), icon: "bookings", active: activeTab === "bookings" },
@@ -113,8 +110,7 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
         { label: copy.nav.quotes, href: ownerHref(language, "quotes"), icon: "quotes", active: activeTab === "quotes" },
         { label: copy.nav.messages, href: ownerHref(language, "messages"), icon: "messages", active: activeTab === "messages" }
       ]}
-      searchLabel={copy.searchLabel}
-      searchPlaceholder={copy.searchPlaceholder}
+      showSearch={false}
       signOutLabel={copy.signOut}
       subtitle={copy.subtitle}
       topbarActions={
