@@ -39,6 +39,26 @@ Fill in:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+For local call/SMS testing, also fill in the Twilio values in `.env.local` and expose your local app with a public tunnel:
+
+```bash
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_MESSAGING_SERVICE_SID=your_twilio_messaging_service_sid
+TWILIO_FROM_PHONE=+15555555555
+TWILIO_WEBHOOK_BASE_URL=https://your-public-tunnel-url
+OFICIO_CRON_SECRET=replace-with-a-long-random-secret
+```
+
+Configure Twilio webhooks with these local URLs:
+
+```text
+Voice webhook: https://your-public-tunnel-url/api/twilio/voice
+Voice status callback: https://your-public-tunnel-url/api/twilio/voice/status
+SMS webhook: https://your-public-tunnel-url/api/twilio/sms
 ```
 
 Start the Next.js app:
