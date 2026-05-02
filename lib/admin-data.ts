@@ -4,6 +4,7 @@ import type { Business, ManualBillingAccount, UserProfile } from "@/lib/types";
 
 export type AdminAccount = Business & {
   manual_billing_accounts?: ManualBillingAccount[] | null;
+  owners: UserProfile[];
 };
 
 export type AdminPortalData = {
@@ -38,7 +39,41 @@ export async function getAdminPortalData(): Promise<AdminPortalData> {
     .select("*, manual_billing_accounts(*)")
     .order("created_at", { ascending: false });
 
-  const typedAccounts = (accounts ?? []) as AdminAccount[];
+  const baseAccounts = (accounts ?? []) as Array<Business & { manual_billing_accounts?: ManualBillingAccount[] | null }>;
+  const businessIds = baseAccounts.map((account) => account.id);
+  const ownersByBusiness = new Map<string, UserProfile[]>();
+
+  if (businessIds.length) {
+    const { data: memberships } = await supabase
+      .from("business_users")
+      .select("business_id,user_id")
+      .in("business_id", businessIds)
+      .eq("role", "owner");
+
+    const ownerIds = Array.from(new Set((memberships ?? []).map((membership) => String(membership.user_id))));
+
+    if (ownerIds.length) {
+      const { data: owners } = await supabase
+        .from("users")
+        .select("id,email,full_name,phone,preferred_language,role")
+        .in("id", ownerIds);
+      const ownersById = new Map((owners ?? []).map((owner) => [owner.id, owner as UserProfile]));
+
+      for (const membership of memberships ?? []) {
+        const owner = ownersById.get(String(membership.user_id));
+        if (!owner) continue;
+
+        const businessOwners = ownersByBusiness.get(String(membership.business_id)) ?? [];
+        businessOwners.push(owner);
+        ownersByBusiness.set(String(membership.business_id), businessOwners);
+      }
+    }
+  }
+
+  const typedAccounts: AdminAccount[] = baseAccounts.map((account) => ({
+    ...account,
+    owners: ownersByBusiness.get(account.id) ?? []
+  }));
   const totals = {
     businesses: typedAccounts.length,
     live: typedAccounts.filter((account) => account.status === "live").length,

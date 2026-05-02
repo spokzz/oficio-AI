@@ -2,13 +2,36 @@
 
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { onboardOwner } from "@/app/actions/admin";
+import { onboardOwner, updateBusinessPhoneSetup } from "@/app/actions/admin";
 import { CalendarIcon, DollarIcon, MessageIcon, UsersIcon } from "@/components/ui/icons";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency } from "@/lib/format";
-import type { AdminPortalData } from "@/lib/admin-data";
+import type { AdminAccount, AdminPortalData } from "@/lib/admin-data";
+import type { PhoneSetupMode, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
 
-export type AdminTab = "overview" | "onboarding" | "accounts" | "usage" | "billing" | "playbook";
+export type AdminTab = "overview" | "onboarding" | "accounts" | "phone" | "usage" | "billing" | "playbook";
+
+const phoneSetupLabels: Record<PhoneSetupMode, string> = {
+  call_forwarding: "Keep number + forward calls",
+  port_existing: "Port existing number",
+  sms_transition: "SMS transition mode",
+  twilio_number: "Use Twilio number"
+};
+
+const voiceStatusLabels: Record<VoiceSetupStatus, string> = {
+  active: "Voice active",
+  blocked: "Voice blocked",
+  not_started: "Voice not started",
+  pending: "Voice pending"
+};
+
+const smsStatusLabels: Record<SmsSetupStatus, string> = {
+  active: "SMS active",
+  blocked: "SMS blocked",
+  not_started: "SMS not started",
+  pending: "SMS pending",
+  transition: "SMS transition"
+};
 
 export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; activeTab: AdminTab }) {
   const [toast, setToast] = useState<string | null>(null);
@@ -23,6 +46,7 @@ export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; act
       {activeTab === "overview" ? <Overview data={data} /> : null}
       {activeTab === "onboarding" ? <Onboarding onQueuedCall={() => showToast("Test call queued for demo.")} /> : null}
       {activeTab === "accounts" ? <Accounts data={data} onAction={() => showToast("Account opened for review.")} /> : null}
+      {activeTab === "phone" ? <PhoneSetup data={data} /> : null}
       {activeTab === "usage" ? <Usage data={data} /> : null}
       {activeTab === "billing" ? <Billing data={data} onAction={() => showToast("Billing note saved for demo.")} /> : null}
       {activeTab === "playbook" ? <Playbook onAction={() => showToast("AI playbook saved for demo.")} /> : null}
@@ -82,7 +106,9 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
         <thead>
           <tr>
             <th>Business</th>
+            <th>Owner</th>
             <th>Trade</th>
+            <th>Phone setup</th>
             <th>Status</th>
             <th>Plan</th>
             <th>Billing</th>
@@ -95,7 +121,14 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
             return (
               <tr key={account.id}>
                 <td>{account.name}</td>
+                <td>
+                  <OwnerList account={account} />
+                </td>
                 <td>{account.trade}</td>
+                <td>
+                  <div>{phoneSetupLabels[account.phone_setup_mode ?? "twilio_number"]}</div>
+                  <div className="meta">{smsStatusLabels[account.sms_setup_status ?? "not_started"]}</div>
+                </td>
                 <td>
                   <StatusPill status={account.status} />
                 </td>
@@ -213,6 +246,134 @@ function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => v
     <section className="card">
       <h2>Accounts</h2>
       <AccountTable data={data} onAction={onAction} />
+    </section>
+  );
+}
+
+function OwnerList({ account }: { account: AdminAccount }) {
+  if (!account.owners.length) return <span className="meta">No owner linked</span>;
+
+  return (
+    <div className="mini-stack">
+      {account.owners.map((owner) => (
+        <div key={owner.id}>
+          <strong>{owner.full_name ?? owner.email ?? "Owner"}</strong>
+          <div className="meta">{owner.phone ?? owner.email ?? "No contact"}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function setupStatusClass(status: VoiceSetupStatus | SmsSetupStatus) {
+  if (status === "active") return "success";
+  if (status === "blocked") return "danger";
+  if (status === "pending" || status === "transition") return "warn";
+  return "info";
+}
+
+function PhoneSetup({ data }: { data: AdminPortalData }) {
+  return (
+    <div className="grid">
+      <section className="card">
+        <h2>Phone Setup</h2>
+        <p className="meta">
+          Track whether each business uses a Twilio number, call forwarding, number porting, or SMS transition. Existing personal
+          mobile SMS cannot be read directly; transition mode gives owners a structured forwarding path.
+        </p>
+      </section>
+      <div className="grid">
+        {data.accounts.map((account) => (
+          <PhoneSetupForm account={account} key={account.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PhoneSetupForm({ account }: { account: AdminAccount }) {
+  const [state, formAction] = useActionState(updateBusinessPhoneSetup, {});
+
+  return (
+    <section className="card">
+      <div className="section-card-header">
+        <div>
+          <h2>{account.name}</h2>
+          <OwnerList account={account} />
+        </div>
+        <div className="phone-status-row">
+          <span className={`pill ${setupStatusClass(account.voice_setup_status ?? "not_started")}`}>
+            {voiceStatusLabels[account.voice_setup_status ?? "not_started"]}
+          </span>
+          <span className={`pill ${setupStatusClass(account.sms_setup_status ?? "not_started")}`}>
+            {smsStatusLabels[account.sms_setup_status ?? "not_started"]}
+          </span>
+        </div>
+      </div>
+      <form action={formAction}>
+        <input name="businessId" type="hidden" value={account.id} />
+        <div className="form-grid">
+          <label className="field">
+            <span>Setup mode</span>
+            <select defaultValue={account.phone_setup_mode ?? "twilio_number"} name="phoneSetupMode">
+              <option value="twilio_number">Use Twilio number as business number</option>
+              <option value="call_forwarding">Keep existing number and forward calls</option>
+              <option value="port_existing">Port existing number to Twilio</option>
+              <option value="sms_transition">Existing number with SMS transition</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Business public number</span>
+            <input defaultValue={account.phone ?? ""} name="businessPhone" placeholder="+13125551234" type="tel" />
+          </label>
+          <label className="field">
+            <span>Twilio routing number</span>
+            <input defaultValue={account.twilio_routing_phone ?? ""} name="twilioRoutingPhone" placeholder="+13125559876" type="tel" />
+          </label>
+          <label className="field">
+            <span>Owner transfer cell</span>
+            <input defaultValue={account.owner_transfer_phone ?? account.owners[0]?.phone ?? ""} name="ownerTransferPhone" placeholder="+13125554321" type="tel" />
+          </label>
+          <label className="field">
+            <span>Messaging Service SID</span>
+            <input defaultValue={account.messaging_service_sid ?? ""} name="messagingServiceSid" placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+          </label>
+          <label className="field">
+            <span>Voice status</span>
+            <select defaultValue={account.voice_setup_status ?? "not_started"} name="voiceSetupStatus">
+              <option value="not_started">Not started</option>
+              <option value="pending">Pending</option>
+              <option value="active">Active</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>SMS status</span>
+            <select defaultValue={account.sms_setup_status ?? "not_started"} name="smsSetupStatus">
+              <option value="not_started">Not started</option>
+              <option value="pending">Pending</option>
+              <option value="active">Active</option>
+              <option value="transition">Transition</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </label>
+          <label className="field full">
+            <span>Setup notes</span>
+            <textarea
+              defaultValue={
+                account.phone_setup_notes ??
+                "For SMS transition, owner forwards old-number texts to the Twilio number as: FWD +1CUSTOMERNUMBER then the customer message."
+              }
+              name="phoneSetupNotes"
+            />
+          </label>
+        </div>
+        {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
+        {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
+        <div className="toolbar" style={{ marginTop: 16 }}>
+          <SaveSetupButton />
+        </div>
+      </form>
     </section>
   );
 }

@@ -111,6 +111,27 @@ const copy = {
     noCustomerReminders: "No hay recordatorios pendientes.",
     dueForService: "Listo para servicio",
     lastService: "Último servicio",
+    phoneSetup: "Configuración telefónica",
+    phoneSetupSubtitle: "Cómo Ana recibe llamadas y mensajes para este negocio.",
+    publicBusinessNumber: "Número público",
+    anaRoutingNumber: "Número de Ana",
+    ownerTransferNumber: "Transferir al dueño",
+    messagingStatus: "Estado SMS",
+    voiceStatus: "Estado de voz",
+    smsTransitionHelp: "Para mensajes al número anterior, reenvía a Ana con: FWD +1CLIENTE y pega el mensaje.",
+    phoneSetupModes: {
+      call_forwarding: "Mantener número y reenviar llamadas",
+      port_existing: "Portar número existente",
+      sms_transition: "Transición de SMS",
+      twilio_number: "Usar número de Ana"
+    },
+    setupStatuses: {
+      active: "Activo",
+      blocked: "Bloqueado",
+      not_started: "No iniciado",
+      pending: "Pendiente",
+      transition: "Transición"
+    },
     noAiObservations: "No hay observaciones de AI todavía.",
     review: "Revisar",
     actions: "Acciones",
@@ -262,6 +283,27 @@ const copy = {
     noCustomerReminders: "No customer reminders due.",
     dueForService: "Due for service",
     lastService: "Last service",
+    phoneSetup: "Phone setup",
+    phoneSetupSubtitle: "How Ana receives calls and texts for this business.",
+    publicBusinessNumber: "Public number",
+    anaRoutingNumber: "Ana number",
+    ownerTransferNumber: "Owner transfer",
+    messagingStatus: "SMS status",
+    voiceStatus: "Voice status",
+    smsTransitionHelp: "For texts sent to the old number, forward to Ana with: FWD +1CUSTOMER and paste the message.",
+    phoneSetupModes: {
+      call_forwarding: "Keep number and forward calls",
+      port_existing: "Port existing number",
+      sms_transition: "SMS transition",
+      twilio_number: "Use Ana number"
+    },
+    setupStatuses: {
+      active: "Active",
+      blocked: "Blocked",
+      not_started: "Not started",
+      pending: "Pending",
+      transition: "Transition"
+    },
     noAiObservations: "No AI observations yet.",
     review: "Review",
     actions: "Actions",
@@ -358,6 +400,16 @@ function serviceLabel(labels: OwnerCopy, service?: string | null) {
   if (!service) return labels.notSet;
   const services: Record<string, string> = labels.services;
   return services[service] ?? service.replaceAll("_", " ");
+}
+
+function phoneSetupModeLabel(labels: OwnerCopy, mode?: string | null) {
+  const modes: Record<string, string> = labels.phoneSetupModes;
+  return modes[mode ?? "twilio_number"] ?? labels.phoneSetupModes.twilio_number;
+}
+
+function setupStatusLabel(labels: OwnerCopy, status?: string | null) {
+  const statuses: Record<string, string> = labels.setupStatuses;
+  return statuses[status ?? "not_started"] ?? labels.setupStatuses.not_started;
 }
 
 function titleCase(value: string) {
@@ -581,6 +633,7 @@ export function OwnerDashboard({
             <Stat label={t.revenue} value={formatCurrency(data.metrics.revenue)} foot={t.currentData} icon={<DollarIcon />} />
             <Stat label={t.recovered} value={data.metrics.recoveredCalls} foot={t.aiOutcomes} icon={<MessageIcon />} />
           </div>
+          <PhoneSetupCard data={data} labels={t} />
           <div className="grid two-col">
             <section className="card">
               <h2>{t.agenda}</h2>
@@ -821,6 +874,46 @@ function CustomerReminderList({ data, labels }: { data: OwnerPortalData; labels:
       ) : (
         <div className="empty-state">{labels.noCustomerReminders}</div>
       )}
+    </section>
+  );
+}
+
+function PhoneSetupCard({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
+  const business = data.business;
+  const mode = business.phone_setup_mode ?? "twilio_number";
+
+  return (
+    <section className="card">
+      <div className="section-card-header">
+        <div>
+          <h2>{labels.phoneSetup}</h2>
+          <p className="meta">{labels.phoneSetupSubtitle}</p>
+        </div>
+        <strong className="customer-count-badge">{phoneSetupModeLabel(labels, mode)}</strong>
+      </div>
+      <div className="grid three-col">
+        <article className="row-card">
+          <strong>{labels.publicBusinessNumber}</strong>
+          <div className="meta">{business.phone ?? labels.notSet}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.anaRoutingNumber}</strong>
+          <div className="meta">{business.twilio_routing_phone ?? labels.notSet}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.ownerTransferNumber}</strong>
+          <div className="meta">{business.owner_transfer_phone ?? data.user.phone ?? labels.notSet}</div>
+        </article>
+      </div>
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <span className="pill info">
+          {labels.voiceStatus}: {setupStatusLabel(labels, business.voice_setup_status)}
+        </span>
+        <span className="pill warn">
+          {labels.messagingStatus}: {setupStatusLabel(labels, business.sms_setup_status)}
+        </span>
+      </div>
+      {mode === "sms_transition" ? <p className="meta" style={{ marginTop: 12 }}>{labels.smsTransitionHelp}</p> : null}
     </section>
   );
 }

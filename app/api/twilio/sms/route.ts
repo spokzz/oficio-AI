@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { upsertCallerContact } from "@/lib/call-routing";
+import { ensurePhoneCustomer, findBusinessRoutingContext, upsertCallerContact } from "@/lib/call-routing";
 import { normalizePhone } from "@/lib/phone";
-import { parseTwilioForm, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
+import { parseTwilioForm, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
 
 export const runtime = "nodejs";
 
@@ -18,6 +18,24 @@ function messageTwiml(message: string) {
   return `<Response><Message>${xmlEscape(message)}</Message></Response>`;
 }
 
+function forwardedMessage(body: string) {
+  const match = body.trim().match(/^FWD\s+(\+?\d[\d\s().-]{7,})\s*\n?([\s\S]+)$/i);
+  if (!match) return null;
+
+  const customerPhone = normalizePhone(match[1]);
+  const message = match[2]?.trim();
+
+  if (!customerPhone || !message) return null;
+
+  return { customerPhone, message };
+}
+
+function shortSummary(message: string, customerPhone: string) {
+  const compact = message.replace(/\s+/g, " ").trim();
+  const preview = compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
+  return `Customer SMS from ${customerPhone}: ${preview}`;
+}
+
 export async function POST(request: Request) {
   const params = await parseTwilioForm(request);
 
@@ -27,8 +45,108 @@ export async function POST(request: Request) {
 
   const ownerPhone = normalizePhone(params.From);
   const response = confirmationReply(params.Body ?? "");
+  const routingContext = await findBusinessRoutingContext(params.To);
+
+  if (routingContext && ownerPhone) {
+    const ownerContactPhone = normalizePhone(routingContext.ownerPhone) ?? normalizePhone(routingContext.owner?.phone);
+    const ownerForward = forwardedMessage(params.Body ?? "");
+
+    if (ownerForward && ownerPhone === ownerContactPhone) {
+      const supabase = createAdminClient();
+      const customerId = await ensurePhoneCustomer({
+        businessId: routingContext.business.id,
+        fromPhone: ownerForward.customerPhone
+      });
+
+      const { data: message, error: messageError } = await supabase
+        .from("messages")
+        .insert({
+          business_id: routingContext.business.id,
+          customer_id: customerId,
+          channel: "sms",
+          direction: "inbound",
+          from_phone: ownerForward.customerPhone,
+          to_phone: normalizePhone(params.To),
+          body: ownerForward.message,
+          provider_message_id: params.MessageSid || null
+        })
+        .select("id")
+        .single<{ id: string }>();
+
+      if (messageError || !message) {
+        return twimlResponse(messageTwiml("Ana could not log that forwarded text. Please try again."), { status: 500 });
+      }
+
+      const summary = shortSummary(ownerForward.message, ownerForward.customerPhone);
+      await supabase.from("ai_summaries").insert({
+        business_id: routingContext.business.id,
+        customer_id: customerId,
+        message_id: message.id,
+        summary_language: routingContext.business.owner_summary_language ?? "en",
+        summary,
+        action_needed: "Review forwarded SMS from old business number.",
+        confidence: 0.7
+      });
+
+      return twimlResponse(messageTwiml(`Logged. ${summary}`));
+    }
+
+    if (!response && ownerPhone === ownerContactPhone && /^FWD\b/i.test(params.Body ?? "")) {
+      return twimlResponse(messageTwiml("Use: FWD +1CUSTOMERNUMBER then paste the customer's message."));
+    }
+  }
 
   if (!ownerPhone || !response) {
+    if (routingContext) {
+      const supabase = createAdminClient();
+      const customerId = await ensurePhoneCustomer({
+        businessId: routingContext.business.id,
+        fromPhone: params.From
+      });
+
+      const { data: message, error: messageError } = await supabase
+        .from("messages")
+        .insert({
+          business_id: routingContext.business.id,
+          customer_id: customerId,
+          channel: "sms",
+          direction: "inbound",
+          from_phone: normalizePhone(params.From),
+          to_phone: normalizePhone(params.To),
+          body: params.Body ?? "",
+          provider_message_id: params.MessageSid || null
+        })
+        .select("id")
+        .single<{ id: string }>();
+
+      if (messageError || !message) {
+        return twimlResponse(messageTwiml("Ana could not save that text. Please try again."), { status: 500 });
+      }
+
+      const customerPhone = normalizePhone(params.From) ?? "unknown number";
+      const summary = shortSummary(params.Body ?? "", customerPhone);
+      await supabase.from("ai_summaries").insert({
+        business_id: routingContext.business.id,
+        customer_id: customerId,
+        message_id: message.id,
+        summary_language: routingContext.business.owner_summary_language ?? "en",
+        summary,
+        action_needed: "Customer text needs review.",
+        confidence: 0.7
+      });
+
+      if (routingContext.ownerPhone) {
+        try {
+          await sendTwilioSms({
+            body: summary,
+            to: routingContext.ownerPhone
+          });
+        } catch {
+          // Keep the inbound webhook successful even if owner notification delivery fails.
+        }
+      }
+    }
+
     return twimlResponse("<Response></Response>");
   }
 

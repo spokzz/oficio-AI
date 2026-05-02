@@ -36,9 +36,19 @@ Incoming messages should hit a messaging webhook. Store the message, run the AI 
 Implemented owner confirmation routes:
 
 - `POST /api/twilio/sms` - receives owner YES/NO replies after Ana transfers a personal-screened caller.
+- `POST /api/twilio/sms` - logs owner-forwarded old-number customer texts when the owner sends `FWD +1CUSTOMERNUMBER` followed by the message body.
 - `POST /api/twilio/owner-confirmations/due` - cron/worker endpoint that sends due owner confirmation texts.
 
 When an unknown caller says the call is not about business, Ana transfers the call to the owner and inserts an owner confirmation due two minutes later. Run the due endpoint every minute with `Authorization: Bearer $OFICIO_CRON_SECRET` in production.
+
+For existing businesses that cannot move SMS immediately, use SMS transition mode. The owner can manually forward a customer text from the old number to the Twilio number in this format:
+
+```text
+FWD +13125551234
+Customer message text goes here.
+```
+
+Ana logs the message against that customer phone number and replies to the owner with a short summary. This does not read the owner's personal inbox automatically; it only processes texts the owner deliberately forwards to the Twilio number.
 
 Required SMS environment:
 

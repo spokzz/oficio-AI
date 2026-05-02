@@ -11,6 +11,7 @@ export type RoutingBusiness = {
   phone: string | null;
   twilio_routing_phone: string | null;
   owner_transfer_phone: string | null;
+  owner_summary_language?: string | null;
   ai_voice_name: string;
   ai_disclosure?: string | null;
 };
@@ -42,7 +43,7 @@ export async function findBusinessRoutingContext(toPhone: string | null | undefi
   const filters = phones.flatMap((phone) => [`twilio_routing_phone.eq.${phone}`, `phone.eq.${phone}`]).join(",");
   const { data: business, error: businessError } = await supabase
     .from("businesses")
-    .select("id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,ai_voice_name,ai_disclosure")
+    .select("id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
     .or(filters)
     .limit(1)
     .maybeSingle<RoutingBusiness>();

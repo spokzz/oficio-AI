@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { normalizePhone } from "@/lib/phone";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -9,7 +10,34 @@ type OnboardingState = {
   success?: string;
 };
 
+type PhoneSetupState = {
+  error?: string;
+  success?: string;
+};
+
 const trades = ["landscaping", "roofing", "plumbing", "cleaning", "hvac", "other"] as const;
+const phoneSetupModes = ["twilio_number", "call_forwarding", "port_existing", "sms_transition"] as const;
+const voiceSetupStatuses = ["not_started", "pending", "active", "blocked"] as const;
+const smsSetupStatuses = ["not_started", "pending", "active", "transition", "blocked"] as const;
+
+async function requirePlatformAdmin() {
+  const supabase = await createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "You must be signed in as an admin." } as const;
+  }
+
+  const { data: adminProfile } = await supabase.from("users").select("role").eq("id", user.id).single();
+
+  if (adminProfile?.role !== "platform_admin") {
+    return { error: "Only platform admins can manage this setup." } as const;
+  }
+
+  return { supabase } as const;
+}
 
 export async function onboardOwner(_state: OnboardingState, formData: FormData): Promise<OnboardingState> {
   const businessName = String(formData.get("businessName") ?? "").trim();
@@ -32,20 +60,11 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
     return { error: "Choose a valid service radius." };
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "You must be signed in as an admin." };
+  const admin = await requirePlatformAdmin();
+  if ("error" in admin) {
+    return { error: admin.error };
   }
-
-  const { data: adminProfile } = await supabase.from("users").select("role").eq("id", user.id).single();
-
-  if (adminProfile?.role !== "platform_admin") {
-    return { error: "Only platform admins can onboard owners." };
-  }
+  const { supabase } = admin;
 
   const { data: ownerProfile, error: ownerError } = await supabase
     .from("users")
@@ -168,4 +187,64 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
   revalidatePath("/admin");
 
   return { success: `${businessName} was created and linked to ${ownerEmail}.` };
+}
+
+export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData: FormData): Promise<PhoneSetupState> {
+  const businessId = String(formData.get("businessId") ?? "").trim();
+  const phoneSetupMode = String(formData.get("phoneSetupMode") ?? "");
+  const voiceSetupStatus = String(formData.get("voiceSetupStatus") ?? "");
+  const smsSetupStatus = String(formData.get("smsSetupStatus") ?? "");
+  const businessPhone = normalizePhone(String(formData.get("businessPhone") ?? ""));
+  const twilioRoutingPhone = normalizePhone(String(formData.get("twilioRoutingPhone") ?? ""));
+  const ownerTransferPhone = normalizePhone(String(formData.get("ownerTransferPhone") ?? ""));
+  const messagingServiceSid = String(formData.get("messagingServiceSid") ?? "").trim();
+  const phoneSetupNotes = String(formData.get("phoneSetupNotes") ?? "").trim();
+
+  if (!businessId) {
+    return { error: "Business id is required." };
+  }
+
+  if (!phoneSetupModes.includes(phoneSetupMode as (typeof phoneSetupModes)[number])) {
+    return { error: "Choose a valid phone setup mode." };
+  }
+
+  if (!voiceSetupStatuses.includes(voiceSetupStatus as (typeof voiceSetupStatuses)[number])) {
+    return { error: "Choose a valid voice setup status." };
+  }
+
+  if (!smsSetupStatuses.includes(smsSetupStatus as (typeof smsSetupStatuses)[number])) {
+    return { error: "Choose a valid SMS setup status." };
+  }
+
+  if (messagingServiceSid && !/^MG[a-f0-9]{32}$/i.test(messagingServiceSid)) {
+    return { error: "Messaging Service SID should start with MG and be 34 characters long." };
+  }
+
+  const admin = await requirePlatformAdmin();
+  if ("error" in admin) {
+    return { error: admin.error };
+  }
+
+  const { error } = await admin.supabase
+    .from("businesses")
+    .update({
+      phone: businessPhone,
+      twilio_routing_phone: twilioRoutingPhone,
+      owner_transfer_phone: ownerTransferPhone,
+      phone_setup_mode: phoneSetupMode,
+      voice_setup_status: voiceSetupStatus,
+      sms_setup_status: smsSetupStatus,
+      messaging_service_sid: messagingServiceSid || null,
+      phone_setup_notes: phoneSetupNotes || null
+    })
+    .eq("id", businessId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/owner");
+
+  return { success: "Phone setup saved." };
 }

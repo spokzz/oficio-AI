@@ -1,5 +1,8 @@
 export type AppRole = "owner" | "staff" | "platform_admin";
 export type BusinessStatus = "onboarding" | "live" | "needs_review" | "paused" | "canceled";
+export type PhoneSetupMode = "twilio_number" | "call_forwarding" | "port_existing" | "sms_transition";
+export type VoiceSetupStatus = "not_started" | "pending" | "active" | "blocked";
+export type SmsSetupStatus = "not_started" | "pending" | "active" | "transition" | "blocked";
 export type JobStatus = "lead" | "pending" | "confirmed" | "in_progress" | "completed" | "canceled";
 export type QuoteStatus = "draft" | "needs_owner_approval" | "approved" | "sent" | "accepted" | "declined" | "expired";
 export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
@@ -21,6 +24,11 @@ export type Business = {
   phone: string | null;
   twilio_routing_phone: string | null;
   owner_transfer_phone: string | null;
+  phone_setup_mode: PhoneSetupMode;
+  voice_setup_status: VoiceSetupStatus;
+  sms_setup_status: SmsSetupStatus;
+  messaging_service_sid: string | null;
+  phone_setup_notes: string | null;
   base_address: string | null;
   owner_summary_language: string;
   ai_voice_name: string;

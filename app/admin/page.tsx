@@ -7,6 +7,7 @@ const adminTabs: Array<{ tab: AdminTab; label: string; href: string }> = [
   { tab: "overview", label: "Overview", href: "/admin" },
   { tab: "onboarding", label: "Onboarding", href: "/admin?tab=onboarding" },
   { tab: "accounts", label: "Accounts", href: "/admin?tab=accounts" },
+  { tab: "phone", label: "Phone Setup", href: "/admin?tab=phone" },
   { tab: "usage", label: "Usage", href: "/admin?tab=usage" },
   { tab: "billing", label: "Billing", href: "/admin?tab=billing" },
   { tab: "playbook", label: "AI Playbook", href: "/admin?tab=playbook" }
