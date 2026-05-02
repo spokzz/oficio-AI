@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     [
       "<Response>",
       `<Gather input="speech dtmf" action="${xmlEscape(actionUrl.toString())}" method="POST" timeout="4" speechTimeout="auto">`,
-      `<Say>${xmlEscape(prompt)}</Say>`,
+      `<Say voice="Polly.Joanna" language="en-US">${xmlEscape(prompt)}</Say>`,
       "</Gather>",
       `<Redirect method="POST">${xmlEscape(actionUrl.toString())}</Redirect>`,
       "</Response>"

@@ -19,6 +19,8 @@ const trades = ["landscaping", "roofing", "plumbing", "cleaning", "hvac", "other
 const phoneSetupModes = ["twilio_number", "call_forwarding", "port_existing", "sms_transition"] as const;
 const voiceSetupStatuses = ["not_started", "pending", "active", "blocked"] as const;
 const smsSetupStatuses = ["not_started", "pending", "active", "transition", "blocked"] as const;
+const existingNumberKinds = ["unknown", "business", "personal", "mixed"] as const;
+const portingStatuses = ["not_started", "collecting_info", "submitted", "completed", "blocked"] as const;
 
 async function requirePlatformAdmin() {
   const supabase = await createClient();
@@ -47,6 +49,14 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
   const trade = String(formData.get("trade") ?? "landscaping");
   const radiusMiles = Number(formData.get("radiusMiles") ?? 30);
   const aiInstructions = String(formData.get("aiInstructions") ?? "").trim();
+  const phoneSetupMode = String(formData.get("phoneSetupMode") ?? "twilio_number");
+  const existingNumberKind = String(formData.get("existingNumberKind") ?? "unknown");
+  const businessPhone = normalizePhone(String(formData.get("businessPhone") ?? ""));
+  const twilioRoutingPhone = normalizePhone(String(formData.get("twilioRoutingPhone") ?? ""));
+  const ownerTransferPhone = normalizePhone(String(formData.get("ownerTransferPhone") ?? ""));
+  const messagingServiceSid = String(formData.get("messagingServiceSid") ?? "").trim();
+  const phoneSetupNotes = String(formData.get("phoneSetupNotes") ?? "").trim();
+  const ownerApproved = formData.get("phoneSetupOwnerApproved") === "on";
 
   if (!businessName || !ownerEmail) {
     return { error: "Business name and owner email are required." };
@@ -58,6 +68,22 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
 
   if (!Number.isFinite(radiusMiles) || radiusMiles <= 0) {
     return { error: "Choose a valid service radius." };
+  }
+
+  if (!phoneSetupModes.includes(phoneSetupMode as (typeof phoneSetupModes)[number])) {
+    return { error: "Choose a valid phone setup mode." };
+  }
+
+  if (!existingNumberKinds.includes(existingNumberKind as (typeof existingNumberKinds)[number])) {
+    return { error: "Choose a valid existing number type." };
+  }
+
+  if (messagingServiceSid && !/^MG[a-f0-9]{32}$/i.test(messagingServiceSid)) {
+    return { error: "Messaging Service SID should start with MG and be 34 characters long." };
+  }
+
+  if (phoneSetupMode === "port_existing" && existingNumberKind !== "business") {
+    return { error: "Only port a dedicated business number. Use SMS transition for personal or mixed numbers." };
   }
 
   const admin = await requirePlatformAdmin();
@@ -124,6 +150,17 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
       name: businessName,
       trade,
       status: "onboarding",
+      phone: businessPhone,
+      twilio_routing_phone: twilioRoutingPhone,
+      owner_transfer_phone: ownerTransferPhone,
+      phone_setup_mode: phoneSetupMode,
+      voice_setup_status: phoneSetupMode === "twilio_number" && twilioRoutingPhone ? "active" : "pending",
+      sms_setup_status: phoneSetupMode === "sms_transition" ? "transition" : phoneSetupMode === "twilio_number" && twilioRoutingPhone ? "active" : "pending",
+      messaging_service_sid: messagingServiceSid || null,
+      existing_number_kind: existingNumberKind,
+      porting_status: phoneSetupMode === "port_existing" ? "collecting_info" : "not_started",
+      phone_setup_owner_approved: ownerApproved,
+      phone_setup_notes: phoneSetupNotes || null,
       owner_summary_language: "en",
       ai_voice_name: "Ana",
       ai_disclosure: aiInstructions || "Hi, this is Ana, the AI assistant for this business. How can I help?"
@@ -194,11 +231,14 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
   const phoneSetupMode = String(formData.get("phoneSetupMode") ?? "");
   const voiceSetupStatus = String(formData.get("voiceSetupStatus") ?? "");
   const smsSetupStatus = String(formData.get("smsSetupStatus") ?? "");
+  const existingNumberKind = String(formData.get("existingNumberKind") ?? "unknown");
+  const portingStatus = String(formData.get("portingStatus") ?? "not_started");
   const businessPhone = normalizePhone(String(formData.get("businessPhone") ?? ""));
   const twilioRoutingPhone = normalizePhone(String(formData.get("twilioRoutingPhone") ?? ""));
   const ownerTransferPhone = normalizePhone(String(formData.get("ownerTransferPhone") ?? ""));
   const messagingServiceSid = String(formData.get("messagingServiceSid") ?? "").trim();
   const phoneSetupNotes = String(formData.get("phoneSetupNotes") ?? "").trim();
+  const ownerApproved = formData.get("phoneSetupOwnerApproved") === "on";
 
   if (!businessId) {
     return { error: "Business id is required." };
@@ -216,8 +256,20 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
     return { error: "Choose a valid SMS setup status." };
   }
 
+  if (!existingNumberKinds.includes(existingNumberKind as (typeof existingNumberKinds)[number])) {
+    return { error: "Choose a valid existing number type." };
+  }
+
+  if (!portingStatuses.includes(portingStatus as (typeof portingStatuses)[number])) {
+    return { error: "Choose a valid porting status." };
+  }
+
   if (messagingServiceSid && !/^MG[a-f0-9]{32}$/i.test(messagingServiceSid)) {
     return { error: "Messaging Service SID should start with MG and be 34 characters long." };
+  }
+
+  if (phoneSetupMode === "port_existing" && existingNumberKind !== "business") {
+    return { error: "Only port a dedicated business number. Use SMS transition for personal or mixed numbers." };
   }
 
   const admin = await requirePlatformAdmin();
@@ -235,6 +287,9 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
       voice_setup_status: voiceSetupStatus,
       sms_setup_status: smsSetupStatus,
       messaging_service_sid: messagingServiceSid || null,
+      existing_number_kind: existingNumberKind,
+      porting_status: phoneSetupMode === "port_existing" ? portingStatus : "not_started",
+      phone_setup_owner_approved: ownerApproved,
       phone_setup_notes: phoneSetupNotes || null
     })
     .eq("id", businessId);

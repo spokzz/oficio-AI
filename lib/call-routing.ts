@@ -305,15 +305,12 @@ export function ownerFirstName(owner: RoutingOwner | null) {
 }
 
 export function businessScreeningPrompt(context: RoutingContext) {
-  const name = ownerFirstName(context.owner);
-  const possessive = name === "the owner's" ? name : `${name}'s`;
-  const trade = context.business.trade || "service";
-  return `Hi, this is Ana, ${possessive} assistant. Are you calling about ${trade} service, an estimate, or an existing job?`;
+  return `Hi, thanks for calling ${context.business.name}. This is Ana. How can I help today?`;
 }
 
 export function transferToOwnerTwiml(context: RoutingContext) {
   if (!context.ownerPhone) {
-    return "<Response><Say>Sorry, I cannot reach the owner right now.</Say><Hangup /></Response>";
+    return '<Response><Say voice="Polly.Joanna" language="en-US">Sorry, I cannot reach the owner right now.</Say><Hangup /></Response>';
   }
 
   const callerId = context.business.twilio_routing_phone ?? context.business.phone ?? undefined;
@@ -345,7 +342,7 @@ export function businessFlowTwiml({
 
   return [
     "<Response>",
-    "<Say>Thanks. Ana will collect the job details and send the owner a summary.</Say>",
+    '<Say voice="Polly.Joanna" language="en-US">Thanks, I will pass that along and someone will follow up shortly.</Say>',
     "<Hangup />",
     "</Response>"
   ].join("");
@@ -356,7 +353,11 @@ export function classifyScreeningResponse(text: string | null | undefined): Cont
 
   if (/\b(spam|scam|telemarketer|sales call|robocall)\b/.test(normalized)) return "spam";
   if (/\b(no|nope|personal|friend|family|familia|amigo|not business|not about|wrong number)\b/.test(normalized)) return "personal";
-  if (/\b(yes|service|estimate|quote|job|work|yard|lawn|landscap|booking|appointment|customer|cliente|trabajo|precio)\b/.test(normalized)) {
+  if (
+    /\b(yes|service|estimate|quote|price|cost|job|work|yard|lawn|mow|clean|landscap|booking|schedule|available|appointment|customer|cliente|trabajo|precio)\b/.test(
+      normalized
+    )
+  ) {
     return "customer";
   }
 

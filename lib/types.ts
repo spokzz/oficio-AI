@@ -3,6 +3,8 @@ export type BusinessStatus = "onboarding" | "live" | "needs_review" | "paused" |
 export type PhoneSetupMode = "twilio_number" | "call_forwarding" | "port_existing" | "sms_transition";
 export type VoiceSetupStatus = "not_started" | "pending" | "active" | "blocked";
 export type SmsSetupStatus = "not_started" | "pending" | "active" | "transition" | "blocked";
+export type ExistingNumberKind = "unknown" | "business" | "personal" | "mixed";
+export type PortingStatus = "not_started" | "collecting_info" | "submitted" | "completed" | "blocked";
 export type JobStatus = "lead" | "pending" | "confirmed" | "in_progress" | "completed" | "canceled";
 export type QuoteStatus = "draft" | "needs_owner_approval" | "approved" | "sent" | "accepted" | "declined" | "expired";
 export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
@@ -29,6 +31,9 @@ export type Business = {
   sms_setup_status: SmsSetupStatus;
   messaging_service_sid: string | null;
   phone_setup_notes: string | null;
+  existing_number_kind: ExistingNumberKind;
+  porting_status: PortingStatus;
+  phone_setup_owner_approved: boolean;
   base_address: string | null;
   owner_summary_language: string;
   ai_voice_name: string;

@@ -1119,6 +1119,112 @@ p {
   color: var(--text);
 }
 
+.mini-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.phone-status-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.scenario-picker {
+  border: 0;
+  display: grid;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+}
+
+.scenario-picker legend {
+  color: var(--green-950);
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+.scenario-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scenario-option {
+  align-items: flex-start;
+  background: #fbfbfa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 122px;
+  padding: 14px;
+}
+
+.scenario-option.selected {
+  background: #fffaf5;
+  border-color: rgba(255, 128, 40, 0.52);
+  box-shadow: 0 0 0 3px rgba(255, 128, 40, 0.1);
+}
+
+.scenario-option input {
+  accent-color: var(--orange-700);
+  height: 18px;
+  margin-top: 2px;
+  width: 18px;
+}
+
+.scenario-option span {
+  display: grid;
+  gap: 6px;
+}
+
+.scenario-option small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.setup-guidance {
+  margin: 14px 0;
+}
+
+.setup-steps {
+  color: var(--muted);
+  display: grid;
+  font-size: 14px;
+  gap: 6px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.checkbox-field {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.checkbox-field input {
+  height: 20px;
+  margin-top: 2px;
+  min-height: 20px;
+  padding: 0;
+  width: 20px;
+}
+
+.phone-guidance-card {
+  background: #fffaf5;
+  border-color: rgba(255, 128, 40, 0.2);
+  margin-bottom: 14px;
+}
+
 .reminder-card {
   border-color: rgba(255, 128, 40, 0.22);
 }
@@ -2067,6 +2173,7 @@ p {
   }
 
   .portal-nav,
+  .scenario-grid,
   .form-grid {
     grid-template-columns: 1fr;
   }

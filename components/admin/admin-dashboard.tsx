@@ -7,7 +7,7 @@ import { CalendarIcon, DollarIcon, MessageIcon, UsersIcon } from "@/components/u
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency } from "@/lib/format";
 import type { AdminAccount, AdminPortalData } from "@/lib/admin-data";
-import type { PhoneSetupMode, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
+import type { ExistingNumberKind, PhoneSetupMode, PortingStatus, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
 
 export type AdminTab = "overview" | "onboarding" | "accounts" | "phone" | "usage" | "billing" | "playbook";
 
@@ -32,6 +32,78 @@ const smsStatusLabels: Record<SmsSetupStatus, string> = {
   pending: "SMS pending",
   transition: "SMS transition"
 };
+
+const existingNumberKindLabels: Record<ExistingNumberKind, string> = {
+  business: "Dedicated business number",
+  mixed: "Mixed business/personal number",
+  personal: "Owner personal cell",
+  unknown: "Not confirmed"
+};
+
+const portingStatusLabels: Record<PortingStatus, string> = {
+  blocked: "Blocked",
+  collecting_info: "Collecting port info",
+  completed: "Port completed",
+  not_started: "Not started",
+  submitted: "Submitted to Twilio"
+};
+
+const setupScenarios: Array<{
+  mode: PhoneSetupMode;
+  title: string;
+  bestFor: string;
+  adminSteps: string[];
+  ownerMessage: string;
+}> = [
+  {
+    mode: "port_existing",
+    title: "Port existing business number",
+    bestFor: "Best UX when the number is truly a business number.",
+    adminSteps: [
+      "Confirm the number is not the owner's private personal line.",
+      "Collect Twilio porting documents outside this app.",
+      "After port completes, set public number and Twilio routing number to the same number."
+    ],
+    ownerMessage: "Customers keep using the number they already know. Ana answers calls and texts from that same number."
+  },
+  {
+    mode: "sms_transition",
+    title: "Keep personal/mixed number + SMS transition",
+    bestFor: "Best when the owner uses one cell for personal and business.",
+    adminSteps: [
+      "Do not port the personal cell.",
+      "Forward calls from the old number to Ana's Twilio number.",
+      "Owner forwards old-number customer texts to Ana using FWD +1CUSTOMER and the message."
+    ],
+    ownerMessage: "Ana helps move customer conversations to the business texting number without taking over private messages."
+  },
+  {
+    mode: "twilio_number",
+    title: "Use new Ana/Twilio number",
+    bestFor: "Best for new businesses or owners ready to use a new official number.",
+    adminSteps: [
+      "Add the Twilio number to the Messaging Service sender pool.",
+      "Use the Twilio number on website, Google profile, cards, and ads.",
+      "Set voice and SMS to active after a live call/text test."
+    ],
+    ownerMessage: "Customers call and text Ana directly on the new business number."
+  },
+  {
+    mode: "call_forwarding",
+    title: "Calls only: keep number + forward calls",
+    bestFor: "Useful when SMS migration is delayed but call answering can start.",
+    adminSteps: [
+      "Set up carrier call forwarding from the existing number to Ana's Twilio number.",
+      "Keep SMS marked pending or transition until the owner chooses a texting path.",
+      "Test a customer-style call and a personal-transfer call."
+    ],
+    ownerMessage: "Ana answers forwarded calls. Text messages stay on the existing phone until SMS transition or porting is chosen."
+  }
+];
+
+function scenarioFor(mode: PhoneSetupMode) {
+  return setupScenarios.find((scenario) => scenario.mode === mode) ?? setupScenarios[2];
+}
 
 export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; activeTab: AdminTab }) {
   const [toast, setToast] = useState<string | null>(null);
@@ -127,6 +199,7 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
                 <td>{account.trade}</td>
                 <td>
                   <div>{phoneSetupLabels[account.phone_setup_mode ?? "twilio_number"]}</div>
+                  <div className="meta">{existingNumberKindLabels[account.existing_number_kind ?? "unknown"]}</div>
                   <div className="meta">{smsStatusLabels[account.sms_setup_status ?? "not_started"]}</div>
                 </td>
                 <td>
@@ -160,9 +233,11 @@ function SaveSetupButton() {
 
 function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
   const [state, formAction] = useActionState(onboardOwner, {});
+  const [selectedMode, setSelectedMode] = useState<PhoneSetupMode>("twilio_number");
+  const selectedScenario = scenarioFor(selectedMode);
 
   return (
-    <div className="grid two-col">
+    <div className="grid">
       <section className="card">
         <h2>New Owner Setup</h2>
         <form action={formAction}>
@@ -208,6 +283,56 @@ function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
               <textarea
                 defaultValue="Speak as Ana. Use English for customer conversations and owner summaries. Require owner approval before final quotes."
                 name="aiInstructions"
+              />
+            </label>
+          </div>
+          <PhoneScenarioPicker selectedMode={selectedMode} onSelect={setSelectedMode} />
+          <div className="setup-guidance">
+            <article className="row-card">
+              <strong>{selectedScenario.title}</strong>
+              <div className="meta">{selectedScenario.ownerMessage}</div>
+              <ol className="setup-steps">
+                {selectedScenario.adminSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </article>
+          </div>
+          <div className="form-grid" style={{ marginTop: 16 }}>
+            <label className="field">
+              <span>Existing number type</span>
+              <select defaultValue={selectedMode === "port_existing" ? "business" : "unknown"} name="existingNumberKind">
+                <option value="unknown">Not confirmed</option>
+                <option value="business">Dedicated business number</option>
+                <option value="personal">Owner personal cell</option>
+                <option value="mixed">Mixed business/personal number</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Business public number</span>
+              <input name="businessPhone" placeholder="+13125551234" type="tel" />
+            </label>
+            <label className="field">
+              <span>Twilio/Ana number</span>
+              <input name="twilioRoutingPhone" placeholder="+13125559876" type="tel" />
+            </label>
+            <label className="field">
+              <span>Owner private cell for transfers</span>
+              <input name="ownerTransferPhone" placeholder="+13125554321" type="tel" />
+            </label>
+            <label className="field">
+              <span>Messaging Service SID</span>
+              <input name="messagingServiceSid" placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            </label>
+            <label className="field full checkbox-field">
+              <input name="phoneSetupOwnerApproved" type="checkbox" />
+              <span>Owner approved this phone setup path and understands what number customers will see.</span>
+            </label>
+            <label className="field full">
+              <span>Phone setup notes</span>
+              <textarea
+                defaultValue="Capture porting readiness, forwarding instructions, customer-facing intro message, and any owner concerns. Do not store carrier account PINs here."
+                name="phoneSetupNotes"
               />
             </label>
           </div>
@@ -272,6 +397,37 @@ function setupStatusClass(status: VoiceSetupStatus | SmsSetupStatus) {
   return "info";
 }
 
+function PhoneScenarioPicker({
+  selectedMode,
+  onSelect
+}: {
+  selectedMode: PhoneSetupMode;
+  onSelect: (mode: PhoneSetupMode) => void;
+}) {
+  return (
+    <fieldset className="scenario-picker">
+      <legend>Phone setup scenario</legend>
+      <div className="scenario-grid">
+        {setupScenarios.map((scenario) => (
+          <label className={`scenario-option ${selectedMode === scenario.mode ? "selected" : ""}`} key={scenario.mode}>
+            <input
+              checked={selectedMode === scenario.mode}
+              name="phoneSetupMode"
+              onChange={() => onSelect(scenario.mode)}
+              type="radio"
+              value={scenario.mode}
+            />
+            <span>
+              <strong>{scenario.title}</strong>
+              <small>{scenario.bestFor}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function PhoneSetup({ data }: { data: AdminPortalData }) {
   return (
     <div className="grid">
@@ -293,6 +449,8 @@ function PhoneSetup({ data }: { data: AdminPortalData }) {
 
 function PhoneSetupForm({ account }: { account: AdminAccount }) {
   const [state, formAction] = useActionState(updateBusinessPhoneSetup, {});
+  const [selectedMode, setSelectedMode] = useState<PhoneSetupMode>(account.phone_setup_mode ?? "twilio_number");
+  const selectedScenario = scenarioFor(selectedMode);
 
   return (
     <section className="card">
@@ -312,14 +470,36 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
       </div>
       <form action={formAction}>
         <input name="businessId" type="hidden" value={account.id} />
+        <PhoneScenarioPicker selectedMode={selectedMode} onSelect={setSelectedMode} />
+        <div className="setup-guidance">
+          <article className="row-card">
+            <strong>{selectedScenario.title}</strong>
+            <div className="meta">{selectedScenario.ownerMessage}</div>
+            <ol className="setup-steps">
+              {selectedScenario.adminSteps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </article>
+        </div>
         <div className="form-grid">
           <label className="field">
-            <span>Setup mode</span>
-            <select defaultValue={account.phone_setup_mode ?? "twilio_number"} name="phoneSetupMode">
-              <option value="twilio_number">Use Twilio number as business number</option>
-              <option value="call_forwarding">Keep existing number and forward calls</option>
-              <option value="port_existing">Port existing number to Twilio</option>
-              <option value="sms_transition">Existing number with SMS transition</option>
+            <span>Existing number type</span>
+            <select defaultValue={account.existing_number_kind ?? "unknown"} name="existingNumberKind">
+              <option value="unknown">Not confirmed</option>
+              <option value="business">Dedicated business number</option>
+              <option value="personal">Owner personal cell</option>
+              <option value="mixed">Mixed business/personal number</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Porting status</span>
+            <select defaultValue={account.porting_status ?? "not_started"} name="portingStatus">
+              <option value="not_started">Not started</option>
+              <option value="collecting_info">Collecting port info</option>
+              <option value="submitted">Submitted to Twilio</option>
+              <option value="completed">Completed</option>
+              <option value="blocked">Blocked</option>
             </select>
           </label>
           <label className="field">
@@ -356,6 +536,10 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
               <option value="transition">Transition</option>
               <option value="blocked">Blocked</option>
             </select>
+          </label>
+          <label className="field full checkbox-field">
+            <input defaultChecked={account.phone_setup_owner_approved} name="phoneSetupOwnerApproved" type="checkbox" />
+            <span>Owner approved this path and understands what number customers will see.</span>
           </label>
           <label className="field full">
             <span>Setup notes</span>

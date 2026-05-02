@@ -118,7 +118,31 @@ const copy = {
     ownerTransferNumber: "Transferir al dueño",
     messagingStatus: "Estado SMS",
     voiceStatus: "Estado de voz",
+    currentPhonePlan: "Plan actual",
+    customerWillSee: "El cliente verá",
+    ownerPrivateNumber: "Número privado del dueño",
+    existingNumberType: "Tipo de número actual",
+    portingStatus: "Estado de portación",
     smsTransitionHelp: "Para mensajes al número anterior, reenvía a Ana con: FWD +1CLIENTE y pega el mensaje.",
+    ownerSetupMessages: {
+      call_forwarding: "Ana contesta llamadas reenviadas. Los SMS siguen en el teléfono actual hasta elegir transición o portación.",
+      port_existing: "Cuando la portación termine, los clientes usarán el mismo número de siempre y Ana manejará llamadas y mensajes.",
+      sms_transition: "Ana no lee mensajes privados automáticamente. Reenvía mensajes de clientes a Ana con el formato indicado para registrarlos.",
+      twilio_number: "Este número de Ana es el número oficial para llamadas y mensajes del negocio."
+    },
+    existingNumberKinds: {
+      business: "Número de negocio",
+      mixed: "Negocio y personal",
+      personal: "Celular personal",
+      unknown: "No confirmado"
+    },
+    portingStatuses: {
+      blocked: "Bloqueado",
+      collecting_info: "Recopilando información",
+      completed: "Completado",
+      not_started: "No iniciado",
+      submitted: "Enviado a Twilio"
+    },
     phoneSetupModes: {
       call_forwarding: "Mantener número y reenviar llamadas",
       port_existing: "Portar número existente",
@@ -290,7 +314,31 @@ const copy = {
     ownerTransferNumber: "Owner transfer",
     messagingStatus: "SMS status",
     voiceStatus: "Voice status",
+    currentPhonePlan: "Current plan",
+    customerWillSee: "Customer will see",
+    ownerPrivateNumber: "Owner private number",
+    existingNumberType: "Existing number type",
+    portingStatus: "Porting status",
     smsTransitionHelp: "For texts sent to the old number, forward to Ana with: FWD +1CUSTOMER and paste the message.",
+    ownerSetupMessages: {
+      call_forwarding: "Ana answers forwarded calls. Text messages stay on the existing phone until SMS transition or porting is chosen.",
+      port_existing: "After the port completes, customers keep using the same number and Ana handles calls and texts from it.",
+      sms_transition: "Ana does not read private texts automatically. Forward customer texts to Ana in the format shown so they can be logged.",
+      twilio_number: "This Ana number is the official business number for customer calls and texts."
+    },
+    existingNumberKinds: {
+      business: "Business number",
+      mixed: "Business and personal",
+      personal: "Personal cell",
+      unknown: "Not confirmed"
+    },
+    portingStatuses: {
+      blocked: "Blocked",
+      collecting_info: "Collecting info",
+      completed: "Completed",
+      not_started: "Not started",
+      submitted: "Submitted to Twilio"
+    },
     phoneSetupModes: {
       call_forwarding: "Keep number and forward calls",
       port_existing: "Port existing number",
@@ -410,6 +458,21 @@ function phoneSetupModeLabel(labels: OwnerCopy, mode?: string | null) {
 function setupStatusLabel(labels: OwnerCopy, status?: string | null) {
   const statuses: Record<string, string> = labels.setupStatuses;
   return statuses[status ?? "not_started"] ?? labels.setupStatuses.not_started;
+}
+
+function ownerSetupMessage(labels: OwnerCopy, mode?: string | null) {
+  const messages: Record<string, string> = labels.ownerSetupMessages;
+  return messages[mode ?? "twilio_number"] ?? labels.ownerSetupMessages.twilio_number;
+}
+
+function existingNumberKindLabel(labels: OwnerCopy, kind?: string | null) {
+  const kinds: Record<string, string> = labels.existingNumberKinds;
+  return kinds[kind ?? "unknown"] ?? labels.existingNumberKinds.unknown;
+}
+
+function portingStatusLabel(labels: OwnerCopy, status?: string | null) {
+  const statuses: Record<string, string> = labels.portingStatuses;
+  return statuses[status ?? "not_started"] ?? labels.portingStatuses.not_started;
 }
 
 function titleCase(value: string) {
@@ -881,6 +944,7 @@ function CustomerReminderList({ data, labels }: { data: OwnerPortalData; labels:
 function PhoneSetupCard({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
   const business = data.business;
   const mode = business.phone_setup_mode ?? "twilio_number";
+  const customerFacingNumber = mode === "twilio_number" ? business.twilio_routing_phone : business.phone;
 
   return (
     <section className="card">
@@ -891,18 +955,34 @@ function PhoneSetupCard({ data, labels }: { data: OwnerPortalData; labels: Owner
         </div>
         <strong className="customer-count-badge">{phoneSetupModeLabel(labels, mode)}</strong>
       </div>
+      <article className="row-card phone-guidance-card">
+        <strong>{labels.currentPhonePlan}</strong>
+        <div className="meta">{ownerSetupMessage(labels, mode)}</div>
+      </article>
       <div className="grid three-col">
         <article className="row-card">
-          <strong>{labels.publicBusinessNumber}</strong>
-          <div className="meta">{business.phone ?? labels.notSet}</div>
+          <strong>{labels.customerWillSee}</strong>
+          <div className="meta">{customerFacingNumber ?? labels.notSet}</div>
         </article>
         <article className="row-card">
           <strong>{labels.anaRoutingNumber}</strong>
           <div className="meta">{business.twilio_routing_phone ?? labels.notSet}</div>
         </article>
         <article className="row-card">
-          <strong>{labels.ownerTransferNumber}</strong>
+          <strong>{labels.ownerPrivateNumber}</strong>
           <div className="meta">{business.owner_transfer_phone ?? data.user.phone ?? labels.notSet}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.publicBusinessNumber}</strong>
+          <div className="meta">{business.phone ?? labels.notSet}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.existingNumberType}</strong>
+          <div className="meta">{existingNumberKindLabel(labels, business.existing_number_kind)}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.portingStatus}</strong>
+          <div className="meta">{portingStatusLabel(labels, business.porting_status)}</div>
         </article>
       </div>
       <div className="toolbar" style={{ marginTop: 14 }}>
