@@ -98,6 +98,19 @@ const copy = {
     noAddress: "Sin dirección",
     service: "Servicio",
     serviceFee: "Tarifa de servicio",
+    joinedOn: "Se unió",
+    automatic: "Automático",
+    recurringService: "Servicio recurrente",
+    recurringEveryWeeks: "Repetir cada (semanas)",
+    notRecurring: "No recurrente",
+    every: "cada",
+    week: "semana",
+    weeks: "semanas",
+    customerReminders: "Recordatorios de clientes",
+    customerRemindersSubtitle: "Clientes recurrentes que ya necesitan seguimiento.",
+    noCustomerReminders: "No hay recordatorios pendientes.",
+    dueForService: "Listo para servicio",
+    lastService: "Último servicio",
     noAiObservations: "No hay observaciones de AI todavía.",
     review: "Revisar",
     actions: "Acciones",
@@ -236,6 +249,19 @@ const copy = {
     noAddress: "No address",
     service: "Service",
     serviceFee: "Service fee",
+    joinedOn: "Joined on",
+    automatic: "Automatic",
+    recurringService: "Recurring service",
+    recurringEveryWeeks: "Repeat every (weeks)",
+    notRecurring: "Not recurring",
+    every: "every",
+    week: "week",
+    weeks: "weeks",
+    customerReminders: "Customer reminders",
+    customerRemindersSubtitle: "Recurring customers who are ready for follow-up.",
+    noCustomerReminders: "No customer reminders due.",
+    dueForService: "Due for service",
+    lastService: "Last service",
     noAiObservations: "No AI observations yet.",
     review: "Review",
     actions: "Actions",
@@ -365,6 +391,27 @@ function serviceFeeLabel(labels: OwnerCopy, fee?: number | null) {
     minimumFractionDigits: value % 1 === 0 ? 0 : 2,
     style: "currency"
   }).format(value);
+}
+
+function formatDate(value: string | null | undefined, fallback = "Not set") {
+  if (!value) return fallback;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(date);
+}
+
+function recurringServiceLabel(labels: OwnerCopy, customer: Customer) {
+  if (!customer.recurring_interval_weeks) return labels.notRecurring;
+
+  return `${serviceLabel(labels, customer.recurring_service_type)} ${labels.every} ${customer.recurring_interval_weeks} ${
+    customer.recurring_interval_weeks === 1 ? labels.week : labels.weeks
+  }`;
 }
 
 function normalizedSearch(value?: string | null) {
@@ -576,6 +623,7 @@ export function OwnerDashboard({
               )}
             </section>
           </div>
+          <CustomerReminderList data={data} labels={t} />
           <div className="grid three-col">
             <section className="card span-2">
               <h2>{t.aiCallAnalytics}</h2>
@@ -741,6 +789,39 @@ function JobList({
         </article>
       ))}
     </div>
+  );
+}
+
+function CustomerReminderList({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
+  return (
+    <section className="card reminder-card">
+      <div className="section-card-header">
+        <div>
+          <h2>{labels.customerReminders}</h2>
+          <p className="meta">{labels.customerRemindersSubtitle}</p>
+        </div>
+        <strong className="reminder-count">{data.customerReminders.length}</strong>
+      </div>
+      {data.customerReminders.length ? (
+        <div className="list">
+          {data.customerReminders.slice(0, 4).map((reminder) => (
+            <article className="row-card reminder-row" key={reminder.customerId}>
+              <strong>{reminder.customerName}</strong>
+              <div className="meta">
+                {serviceLabel(labels, reminder.serviceType)} {labels.every} {reminder.intervalWeeks}{" "}
+                {reminder.intervalWeeks === 1 ? labels.week : labels.weeks}
+              </div>
+              <div className="meta">
+                {labels.dueForService}: {formatDate(reminder.dueAt, labels.notSet)}
+                {reminder.lastServiceAt ? ` · ${labels.lastService}: ${formatDate(reminder.lastServiceAt, labels.notSet)}` : ""}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">{labels.noCustomerReminders}</div>
+      )}
+    </section>
   );
 }
 
@@ -981,7 +1062,9 @@ function CustomersTab({
                 </button>
               </th>
               <th>{labels.phone}</th>
+              <th>{labels.joinedOn}</th>
               <th>{labels.service}</th>
+              <th>{labels.recurringService}</th>
               <th>{labels.serviceFee}</th>
               <th>{labels.language}</th>
               <th>{labels.address}</th>
@@ -996,7 +1079,9 @@ function CustomersTab({
                     <span className="customer-name">{customer.full_name}</span>
                   </td>
                   <td>{customer.phone ?? labels.missing}</td>
+                  <td>{formatDate(customer.created_at, labels.notSet)}</td>
                   <td>{serviceLabel(labels, customerServices[customer.id])}</td>
+                  <td>{recurringServiceLabel(labels, customer)}</td>
                   <td>{serviceFeeLabel(labels, customer.service_fee)}</td>
                   <td>{languageLabel(labels, customer.preferred_language)}</td>
                   <td>{customer.address ?? labels.noAddress}</td>
@@ -1020,7 +1105,7 @@ function CustomersTab({
               ))
             ) : (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={9}>
                   <div className="empty-state">{customers.length ? labels.noMatchingCustomers : labels.noCustomers}</div>
                 </td>
               </tr>
@@ -1107,7 +1192,9 @@ function CustomerDetailsModal({
     { label: labels.fullName, value: customer.full_name },
     { label: labels.phone, value: customer.phone ?? labels.missing },
     { label: labels.email, value: customer.email ?? labels.missing },
+    { label: labels.joinedOn, value: formatDate(customer.created_at, labels.notSet) },
     { label: labels.service, value: serviceLabel(labels, service) },
+    { label: labels.recurringService, value: recurringServiceLabel(labels, customer) },
     { label: labels.serviceFee, value: serviceFeeLabel(labels, customer.service_fee) },
     { label: labels.preferredLanguage, value: languageLabel(labels, customer.preferred_language) },
     { label: labels.source, value: sourceLabel(labels, customer.referral_source) },
@@ -1201,6 +1288,10 @@ function AddCustomerModal({
             <input name="email" type="email" />
           </label>
           <label className="field">
+            <span>{labels.joinedOn}</span>
+            <input readOnly value={labels.automatic} />
+          </label>
+          <label className="field">
             <span>{labels.service}</span>
             <select defaultValue="landscaping" name="serviceType" required>
               {serviceOptions.map((service: ServiceOption) => (
@@ -1216,6 +1307,10 @@ function AddCustomerModal({
               <span aria-hidden="true">$</span>
               <input className="service-fee-input" inputMode="decimal" min="0" name="serviceFee" step="0.01" type="number" />
             </div>
+          </label>
+          <label className="field">
+            <span>{labels.recurringEveryWeeks}</span>
+            <input inputMode="numeric" max="52" min="1" name="recurringIntervalWeeks" placeholder="2" type="number" />
           </label>
           <label className="field">
             <span>{labels.sourceQuestion}</span>
@@ -1598,6 +1693,10 @@ function EditCustomerModal({
             <input defaultValue={customer.email ?? ""} name="email" type="email" />
           </label>
           <label className="field">
+            <span>{labels.joinedOn}</span>
+            <input readOnly value={formatDate(customer.created_at, labels.notSet)} />
+          </label>
+          <label className="field">
             <span>{labels.service}</span>
             <select defaultValue={selectedService} name="serviceType" required>
               {serviceOptions.map((serviceOption: ServiceOption) => (
@@ -1621,6 +1720,18 @@ function EditCustomerModal({
                 type="number"
               />
             </div>
+          </label>
+          <label className="field">
+            <span>{labels.recurringEveryWeeks}</span>
+            <input
+              defaultValue={customer.recurring_interval_weeks ?? ""}
+              inputMode="numeric"
+              max="52"
+              min="1"
+              name="recurringIntervalWeeks"
+              placeholder="2"
+              type="number"
+            />
           </label>
           <label className="field">
             <span>{labels.sourceQuestion}</span>

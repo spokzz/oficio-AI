@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isCustomerSourceOption } from "@/lib/customer-sources";
 import { isServiceOption } from "@/lib/services";
+import { normalizePhone } from "@/lib/phone";
+import type { ContactClassification } from "@/lib/types";
 
 export type AddCustomerState = {
   error?: string;
@@ -15,6 +17,13 @@ export type AddBookingState = {
   success?: string;
 };
 
+export type MarkCallState = {
+  error?: string;
+  success?: string;
+};
+
+const callClassificationOptions: ContactClassification[] = ["customer", "personal", "vendor", "spam", "unknown"];
+
 function customerInput(formData: FormData) {
   const fullName = String(formData.get("fullName") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
@@ -23,9 +32,11 @@ function customerInput(formData: FormData) {
   const address = String(formData.get("address") ?? "").trim();
   const serviceType = String(formData.get("serviceType") ?? "");
   const serviceFeeValue = String(formData.get("serviceFee") ?? "").trim();
+  const recurringIntervalValue = String(formData.get("recurringIntervalWeeks") ?? "").trim();
   const referralSource = String(formData.get("referralSource") ?? "");
   const notes = String(formData.get("notes") ?? "").trim();
   const serviceFee = serviceFeeValue ? Number(serviceFeeValue) : null;
+  const recurringIntervalWeeks = recurringIntervalValue ? Number(recurringIntervalValue) : null;
 
   if (!fullName) {
     return { error: "Customer name is required." };
@@ -37,6 +48,13 @@ function customerInput(formData: FormData) {
 
   if (serviceFee !== null && (!Number.isFinite(serviceFee) || serviceFee < 0)) {
     return { error: "Enter a valid service fee." };
+  }
+
+  if (
+    recurringIntervalWeeks !== null &&
+    (!Number.isInteger(recurringIntervalWeeks) || recurringIntervalWeeks < 1 || recurringIntervalWeeks > 52)
+  ) {
+    return { error: "Enter a recurring interval between 1 and 52 weeks." };
   }
 
   if (!["auto", "es", "en"].includes(preferredLanguage)) {
@@ -54,6 +72,8 @@ function customerInput(formData: FormData) {
     notes,
     phone,
     preferredLanguage,
+    recurringIntervalWeeks,
+    recurringServiceType: recurringIntervalWeeks ? serviceType : null,
     referralSource,
     serviceFee,
     serviceType
@@ -404,6 +424,8 @@ export async function addOwnerCustomer(_state: AddCustomerState, formData: FormD
       address: input.address || null,
       notes: input.notes || null,
       referral_source: input.referralSource,
+      recurring_interval_weeks: input.recurringIntervalWeeks,
+      recurring_service_type: input.recurringServiceType,
       service_fee: input.serviceFee
     })
     .select("id")
@@ -458,6 +480,8 @@ export async function updateOwnerCustomer(_state: AddCustomerState, formData: Fo
       address: input.address || null,
       notes: input.notes || null,
       referral_source: input.referralSource,
+      recurring_interval_weeks: input.recurringIntervalWeeks,
+      recurring_service_type: input.recurringServiceType,
       service_fee: input.serviceFee
     })
     .eq("id", customerId)
@@ -523,4 +547,109 @@ export async function deleteOwnerCustomer(customerId: string): Promise<AddCustom
   revalidatePath("/owner");
 
   return { success: `${customer?.full_name ?? "Customer"} was deleted.` };
+}
+
+export async function markOwnerRecentCall(callSessionId: string, classification: ContactClassification): Promise<MarkCallState> {
+  const trimmedCallSessionId = callSessionId.trim();
+
+  if (!trimmedCallSessionId) {
+    return { error: "Call session id is required." };
+  }
+
+  if (!callClassificationOptions.includes(classification)) {
+    return { error: "Choose a valid call type." };
+  }
+
+  const owner = await ownerBusinessId();
+  if ("error" in owner) {
+    return { error: owner.error };
+  }
+
+  const { data: call, error: callError } = await owner.supabase
+    .from("call_sessions")
+    .select("id,from_phone,customer_id")
+    .eq("id", trimmedCallSessionId)
+    .eq("business_id", owner.businessId)
+    .maybeSingle<{ id: string; from_phone: string | null; customer_id: string | null }>();
+
+  if (callError || !call) {
+    return { error: callError?.message ?? "Could not find that call." };
+  }
+
+  const phone = normalizePhone(call.from_phone);
+  let customerId = call.customer_id;
+
+  if (classification === "customer" && phone && !customerId) {
+    const { data: existingCustomer, error: existingCustomerError } = await owner.supabase
+      .from("customers")
+      .select("id")
+      .eq("business_id", owner.businessId)
+      .eq("phone", phone)
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+
+    if (existingCustomerError) {
+      return { error: existingCustomerError.message };
+    }
+
+    if (existingCustomer?.id) {
+      customerId = existingCustomer.id;
+    } else {
+      const { data: customer, error: customerError } = await owner.supabase
+        .from("customers")
+        .insert({
+          business_id: owner.businessId,
+          full_name: `Caller ${phone}`,
+          phone,
+          preferred_language: "auto",
+          referral_source: "other",
+          notes: "Created after owner marked a recent call as customer."
+        })
+        .select("id")
+        .single<{ id: string }>();
+
+      if (customerError || !customer) {
+        return { error: customerError?.message ?? "Could not create a customer for this call." };
+      }
+
+      customerId = customer.id;
+    }
+  }
+
+  const { error: callUpdateError } = await owner.supabase
+    .from("call_sessions")
+    .update({
+      contact_type: classification,
+      customer_id: classification === "customer" ? customerId : null,
+      needs_owner_review: false,
+      outcome: `Owner marked this call as ${classification}.`,
+      screening_result: `owner_marked_${classification}`
+    })
+    .eq("id", trimmedCallSessionId)
+    .eq("business_id", owner.businessId);
+
+  if (callUpdateError) {
+    return { error: callUpdateError.message };
+  }
+
+  if (phone) {
+    const { error: contactError } = await owner.supabase.from("caller_contacts").upsert(
+      {
+        business_id: owner.businessId,
+        phone,
+        classification,
+        customer_id: classification === "customer" ? customerId : null,
+        confirmed_by_owner_at: new Date().toISOString()
+      },
+      { onConflict: "business_id,phone" }
+    );
+
+    if (contactError) {
+      return { error: contactError.message };
+    }
+  }
+
+  revalidatePath("/owner");
+
+  return { success: `Call marked as ${classification}.` };
 }

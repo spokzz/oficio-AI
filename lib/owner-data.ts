@@ -14,6 +14,17 @@ import type {
   UserProfile
 } from "@/lib/types";
 
+export type CustomerReminder = {
+  customerId: string;
+  customerName: string;
+  serviceType: string | null;
+  intervalWeeks: number;
+  dueAt: string;
+  lastServiceAt: string | null;
+  phone: string | null;
+  address: string | null;
+};
+
 export type OwnerPortalData = {
   user: UserProfile;
   business: Business;
@@ -26,6 +37,8 @@ export type OwnerPortalData = {
   calls: CallSession[];
   summaries: AiSummary[];
   customerServices: Record<string, string>;
+  customerLastServiceAt: Record<string, string>;
+  customerReminders: CustomerReminder[];
   metrics: {
     totalBookings: number;
     todayJobs: number;
@@ -82,7 +95,7 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
       .eq("business_id", businessId)
       .order("scheduled_start", { ascending: false })
       .limit(200),
-    supabase.from("customers").select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(12),
+    supabase.from("customers").select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(200),
     supabase
       .from("quotes")
       .select("*, customers(full_name, phone, preferred_language, address)")
@@ -112,6 +125,7 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
   const calls = (callsResult.data ?? []) as CallSession[];
   const customerIds = customers.map((customer) => customer.id);
   const customerServices: Record<string, string> = {};
+  const customerLastServiceAt: Record<string, string> = {};
 
   if (customerIds.length) {
     const { data: customerServiceRows } = await supabase
@@ -131,6 +145,63 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
       }
     }
   }
+  const now = new Date();
+  const futureScheduledCustomerIds = new Set<string>();
+
+  for (const job of jobs) {
+    if (!job.customer_id || !job.scheduled_start || job.status === "canceled") {
+      continue;
+    }
+
+    const scheduled = new Date(job.scheduled_start);
+    if (Number.isNaN(scheduled.getTime())) {
+      continue;
+    }
+
+    if (scheduled > now) {
+      futureScheduledCustomerIds.add(job.customer_id);
+      continue;
+    }
+
+    const existing = customerLastServiceAt[job.customer_id];
+    if (!existing || scheduled.getTime() > new Date(existing).getTime()) {
+      customerLastServiceAt[job.customer_id] = job.scheduled_start;
+    }
+  }
+
+  const customerReminders = customers
+    .map<CustomerReminder | null>((customer) => {
+      const intervalWeeks = customer.recurring_interval_weeks;
+      if (!intervalWeeks || futureScheduledCustomerIds.has(customer.id)) {
+        return null;
+      }
+
+      const anchorDate = new Date(customerLastServiceAt[customer.id] ?? customer.created_at);
+      if (Number.isNaN(anchorDate.getTime())) {
+        return null;
+      }
+
+      const dueDate = new Date(anchorDate);
+      dueDate.setDate(dueDate.getDate() + intervalWeeks * 7);
+
+      if (dueDate > now) {
+        return null;
+      }
+
+      return {
+        address: customer.address,
+        customerId: customer.id,
+        customerName: customer.full_name,
+        dueAt: dueDate.toISOString(),
+        intervalWeeks,
+        lastServiceAt: customerLastServiceAt[customer.id] ?? null,
+        phone: customer.phone,
+        serviceType: customer.recurring_service_type
+      };
+    })
+    .filter((reminder): reminder is CustomerReminder => Boolean(reminder))
+    .sort((first, second) => new Date(first.dueAt).getTime() - new Date(second.dueAt).getTime());
+
   const { start, end } = todayRange();
   const scheduledJobs = jobs.filter((job) => job.scheduled_start && job.status !== "canceled");
 
@@ -154,6 +225,8 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
     calls,
     summaries: (summariesResult.data ?? []) as AiSummary[],
     customerServices,
+    customerLastServiceAt,
+    customerReminders,
     metrics
   };
 }

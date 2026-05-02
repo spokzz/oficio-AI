@@ -4,6 +4,21 @@
 
 Inbound calls should hit a webhook that returns TwiML with `<Connect><Stream>` to the voice gateway. The gateway streams audio between Twilio and OpenAI Realtime.
 
+Implemented webhook routes:
+
+- `POST /api/twilio/voice` - inbound voice routing and known-caller bypass.
+- `POST /api/twilio/voice/screen` - one-question unknown caller screening.
+- `POST /api/twilio/voice/status` - call completion updates and qualified business minute usage.
+
+Configure each Twilio number voice webhook to `POST /api/twilio/voice`. Configure Twilio call status callbacks to `POST /api/twilio/voice/status`.
+
+Each business should set:
+
+- `businesses.twilio_routing_phone` - the business-specific Twilio number owners forward calls to.
+- `businesses.owner_transfer_phone` or owner `users.phone` - the cellphone used when Ana transfers personal/vendor calls.
+
+If `OFICIO_VOICE_STREAM_URL` is set, business/customer calls are connected to the realtime voice gateway with `businessId` and `callSessionId` stream parameters. Without it, the webhook records the call and returns a placeholder TwiML response.
+
 ## OpenAI Realtime
 
 The voice gateway should:
@@ -17,6 +32,21 @@ The voice gateway should:
 ## Twilio SMS/MMS
 
 Incoming messages should hit a messaging webhook. Store the message, run the AI text handler, and respond with TwiML `<Message>` when a reply is needed.
+
+Implemented owner confirmation routes:
+
+- `POST /api/twilio/sms` - receives owner YES/NO replies after Ana transfers a personal-screened caller.
+- `POST /api/twilio/owner-confirmations/due` - cron/worker endpoint that sends due owner confirmation texts.
+
+When an unknown caller says the call is not about business, Ana transfers the call to the owner and inserts an owner confirmation due two minutes later. Run the due endpoint every minute with `Authorization: Bearer $OFICIO_CRON_SECRET` in production.
+
+Required SMS environment:
+
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_PHONE`
+- `OFICIO_CRON_SECRET` for the due-confirmation worker in production
+- `TWILIO_WEBHOOK_BASE_URL` when Twilio signature validation needs a public URL different from the runtime request URL
 
 Photo intake:
 

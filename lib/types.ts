@@ -2,6 +2,7 @@ export type AppRole = "owner" | "staff" | "platform_admin";
 export type BusinessStatus = "onboarding" | "live" | "needs_review" | "paused" | "canceled";
 export type JobStatus = "lead" | "pending" | "confirmed" | "in_progress" | "completed" | "canceled";
 export type QuoteStatus = "draft" | "needs_owner_approval" | "approved" | "sent" | "accepted" | "declined" | "expired";
+export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
 
 export type UserProfile = {
   id: string;
@@ -18,6 +19,8 @@ export type Business = {
   trade: string;
   status: BusinessStatus;
   phone: string | null;
+  twilio_routing_phone: string | null;
+  owner_transfer_phone: string | null;
   base_address: string | null;
   owner_summary_language: string;
   ai_voice_name: string;
@@ -53,8 +56,12 @@ export type Customer = {
   preferred_language: string;
   address: string | null;
   referral_source: string | null;
+  recurring_service_type: string | null;
+  recurring_interval_weeks: number | null;
   service_fee: number | null;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type Job = {
@@ -110,7 +117,13 @@ export type CallSession = {
   id: string;
   business_id: string;
   customer_id: string | null;
+  from_phone: string | null;
+  to_phone: string | null;
   detected_language: string | null;
+  contact_type: ContactClassification;
+  screening_result: string | null;
+  needs_owner_review: boolean;
+  qualified_business_seconds: number;
   status: string;
   started_at: string;
   ended_at: string | null;
