@@ -1,8 +1,10 @@
 "use client";
 
-import { useActionState, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   addOwnerBooking,
   addOwnerCustomer,
@@ -10,8 +12,10 @@ import {
   deleteOwnerCustomer,
   updateOwnerBooking,
   updateOwnerCustomer,
+  updateOwnerSettings,
   type AddBookingState,
-  type AddCustomerState
+  type AddCustomerState,
+  type OwnerSettingsState
 } from "@/app/actions/owner";
 import {
   CalendarIcon,
@@ -28,20 +32,44 @@ import {
 } from "@/components/ui/icons";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency, formatDateTime } from "@/lib/format";
+import { formatPhone } from "@/lib/phone";
 import { customerSourceOptions, type CustomerSourceOption } from "@/lib/customer-sources";
 import { serviceOptions, type ServiceOption } from "@/lib/services";
 import type { OwnerPortalData } from "@/lib/owner-data";
 import type { Customer, Job } from "@/lib/types";
 
-type Tab = "home" | "bookings" | "customers" | "quotes" | "messages";
+type Tab = "home" | "bookings" | "customers" | "quotes" | "messages" | "settings";
 type Lang = "es" | "en";
 type BookingView = "current" | "past";
 type CustomerSort = "asc" | "desc";
 
+const DAY_MS = 86_400_000;
+const timeZoneOptions = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu"
+];
+const businessDayOptions = [
+  { label: "Monday", shortLabel: "Mon", value: "monday" },
+  { label: "Tuesday", shortLabel: "Tue", value: "tuesday" },
+  { label: "Wednesday", shortLabel: "Wed", value: "wednesday" },
+  { label: "Thursday", shortLabel: "Thu", value: "thursday" },
+  { label: "Friday", shortLabel: "Fri", value: "friday" },
+  { label: "Saturday", shortLabel: "Sat", value: "saturday" },
+  { label: "Sunday", shortLabel: "Sun", value: "sunday" }
+] as const;
+const businessTimeOptions = ["6:00 AM", "7:00 AM", "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM"] as const;
+
+type BusinessDay = (typeof businessDayOptions)[number]["value"];
+
 const copy = {
   es: {
     home: "Inicio",
-    totalBookings: "Reservas",
+    totalBookings: "Reservas hoy",
     todayJobs: "Trabajos hoy",
     revenue: "Ingresos",
     recovered: "Llamadas recuperadas",
@@ -52,6 +80,7 @@ const copy = {
     customers: "Clientes",
     quotes: "Cotizaciones",
     messages: "Mensajes",
+    settings: "Configuración",
     agenda: "Agenda de hoy",
     pendingQuote: "Cotización para aprobar",
     noJobs: "No hay trabajos todavía.",
@@ -61,9 +90,15 @@ const copy = {
     photos: "Pedir fotos",
     noPendingQuotes: "No hay cotizaciones pendientes.",
     aiCallAnalytics: "Análisis de llamadas AI",
-    weeklyAiCallActivity: "Actividad semanal de llamadas AI",
+    weeklyAiCallActivity: "Actividad mensual de llamadas AI",
+    previousWeek: "Semana anterior",
+    nextWeek: "Semana siguiente",
     anaVoiceAgent: "Agente de voz Ana",
-    liveTestWindow: "Ventana de prueba en vivo",
+    activeCall: "Llamada activa",
+    lastCall: "Última llamada",
+    noCallActivity: "Sin actividad de llamadas",
+    call: "llamada",
+    calls: "llamadas",
     job: "Trabajo",
     customer: "Cliente",
     schedule: "Horario",
@@ -113,6 +148,20 @@ const copy = {
     lastService: "Último servicio",
     phoneSetup: "Configuración telefónica",
     phoneSetupSubtitle: "Cómo Ana recibe llamadas y mensajes para este negocio.",
+    ownerSummarySettings: "Resúmenes para el dueño",
+    ownerSummarySettingsSubtitle: "Elige cómo Ana agenda trabajos, explica horarios y envía resúmenes.",
+    summaryLanguage: "Idioma de resumen",
+    summaryMethod: "Método de resumen",
+    summaryMethodSms: "Texto SMS",
+    summaryMethodEmail: "Email",
+    bookingTimeZone: "Zona horaria de reservas",
+    businessDays: "Días de servicio",
+    businessStartTime: "Hora de inicio",
+    businessEndTime: "Hora de cierre",
+    availableServices: "Servicios ofrecidos",
+    availableServicesHelp: "Ana solo ofrecerá y reservará los servicios seleccionados.",
+    saveSettings: "Guardar configuración",
+    settingsSaved: "Configuración guardada.",
     publicBusinessNumber: "Número público",
     anaRoutingNumber: "Número de Ana",
     ownerTransferNumber: "Transferir al dueño",
@@ -164,6 +213,14 @@ const copy = {
     customerDeleted: "Cliente eliminado.",
     aiSummaries: "Resúmenes AI",
     summary: "Resumen",
+    anaCallLog: "Llamadas con Ana",
+    anaCallLogSubtitle: "Cada llamada muestra el teléfono, nombre cuando Ana lo obtiene y un resumen claro.",
+    callSummary: "Resumen de la llamada",
+    noCalls: "No hay llamadas con Ana todavía.",
+    caller: "Persona",
+    phoneNumber: "Teléfono",
+    mentionedName: "Nombre mencionado",
+    latestMessages: "Mensajes recientes",
     addCustomer: "Agregar cliente",
     addCustomerTitle: "Agregar cliente",
     addCustomerSubtitle: "Crea o actualiza la información del cliente.",
@@ -219,7 +276,7 @@ const copy = {
     services: {
       landscaping: "Paisajismo",
       mowing: "Corte de césped",
-      tree_cutting: "Corte de árboles",
+      tree_cutting: "Servicios de árboles",
       yard_cleanup: "Limpieza de patio",
       irrigation: "Riego"
     },
@@ -237,7 +294,7 @@ const copy = {
   },
   en: {
     home: "Home",
-    totalBookings: "Bookings",
+    totalBookings: "Bookings today",
     todayJobs: "Jobs today",
     revenue: "Revenue",
     recovered: "Recovered calls",
@@ -248,6 +305,7 @@ const copy = {
     customers: "Customers",
     quotes: "Quotes",
     messages: "Messages",
+    settings: "Settings",
     agenda: "Today's agenda",
     pendingQuote: "Quote to approve",
     noJobs: "No jobs yet.",
@@ -257,9 +315,15 @@ const copy = {
     photos: "Ask for photos",
     noPendingQuotes: "No pending quotes.",
     aiCallAnalytics: "AI Call Analytics",
-    weeklyAiCallActivity: "Weekly AI call activity",
+    weeklyAiCallActivity: "Monthly AI call activity",
+    previousWeek: "Previous week",
+    nextWeek: "Next week",
     anaVoiceAgent: "Ana Voice Agent",
-    liveTestWindow: "Live test window",
+    activeCall: "Active call",
+    lastCall: "Last call",
+    noCallActivity: "No call activity",
+    call: "call",
+    calls: "calls",
     job: "Job",
     customer: "Customer",
     schedule: "Schedule",
@@ -309,6 +373,20 @@ const copy = {
     lastService: "Last service",
     phoneSetup: "Phone setup",
     phoneSetupSubtitle: "How Ana receives calls and texts for this business.",
+    ownerSummarySettings: "Owner summaries",
+    ownerSummarySettingsSubtitle: "Choose how Ana schedules jobs, explains hours, and sends owner summaries.",
+    summaryLanguage: "Summary language",
+    summaryMethod: "Summary method",
+    summaryMethodSms: "SMS text",
+    summaryMethodEmail: "Email",
+    bookingTimeZone: "Booking time zone",
+    businessDays: "Business days",
+    businessStartTime: "Start time",
+    businessEndTime: "End time",
+    availableServices: "Services offered",
+    availableServicesHelp: "Ana will only offer and book the selected services.",
+    saveSettings: "Save settings",
+    settingsSaved: "Settings saved.",
     publicBusinessNumber: "Public number",
     anaRoutingNumber: "Ana number",
     ownerTransferNumber: "Owner transfer",
@@ -360,6 +438,14 @@ const copy = {
     customerDeleted: "Customer deleted.",
     aiSummaries: "AI summaries",
     summary: "Summary",
+    anaCallLog: "Ana call log",
+    anaCallLogSubtitle: "Every call shows the phone number, name when Ana gets one, and a clear summary.",
+    callSummary: "Call summary",
+    noCalls: "No Ana calls yet.",
+    caller: "Caller",
+    phoneNumber: "Phone",
+    mentionedName: "Name mentioned",
+    latestMessages: "Recent messages",
     addCustomer: "Add customer",
     addCustomerTitle: "Add customer",
     addCustomerSubtitle: "Create or update the customer profile.",
@@ -367,7 +453,7 @@ const copy = {
     email: "Email",
     preferredLanguage: "Preferred language",
     autoDetect: "Auto-detect",
-    spanish: "Spanish",
+    spanish: "Español",
     english: "English",
     notes: "Notes",
     cancel: "Cancel",
@@ -414,8 +500,8 @@ const copy = {
     },
     services: {
       landscaping: "Landscaping",
-      mowing: "Mowing",
-      tree_cutting: "Tree cutting",
+      mowing: "Lawn mowing",
+      tree_cutting: "Tree services",
       yard_cleanup: "Yard cleaning",
       irrigation: "Irrigation"
     },
@@ -448,6 +534,52 @@ function serviceLabel(labels: OwnerCopy, service?: string | null) {
   if (!service) return labels.notSet;
   const services: Record<string, string> = labels.services;
   return services[service] ?? service.replaceAll("_", " ");
+}
+
+function businessServices(business: OwnerPortalData["business"]): ServiceOption[] {
+  const selected = Array.isArray(business.available_services)
+    ? business.available_services.filter((service): service is ServiceOption => serviceOptions.includes(service as ServiceOption))
+    : [];
+
+  return selected.length ? selected : [...serviceOptions];
+}
+
+function parseBusinessHours(value?: string | null): { days: BusinessDay[]; endTime: string; startTime: string } {
+  const text = String(value ?? "");
+  const lowerText = text.toLowerCase();
+  const days = businessDayOptions
+    .filter((day) => lowerText.includes(day.label.toLowerCase()) || lowerText.includes(day.shortLabel.toLowerCase()))
+    .map((day) => day.value);
+  const matchedTimes = text.match(/\d{1,2}:00\s*[AP]M/gi) ?? [];
+  const startTime = businessTimeOptions.find((time) => time.toLowerCase() === matchedTimes[0]?.toLowerCase()) ?? "8:00 AM";
+  const endTime = businessTimeOptions.find((time) => time.toLowerCase() === matchedTimes[1]?.toLowerCase()) ?? "5:00 PM";
+
+  return {
+    days: days.length ? days : ["monday", "tuesday", "wednesday", "thursday", "friday"],
+    endTime,
+    startTime
+  };
+}
+
+function businessDaysText(days: BusinessDay[]) {
+  const selectedIndexes = days
+    .map((day) => businessDayOptions.findIndex((option) => option.value === day))
+    .filter((index) => index >= 0)
+    .sort((first, second) => first - second);
+
+  if (selectedIndexes.length === 5 && selectedIndexes.every((index, position) => index === position)) {
+    return "Monday through Friday";
+  }
+
+  if (selectedIndexes.length === 7) {
+    return "Monday through Sunday";
+  }
+
+  return selectedIndexes.map((index) => businessDayOptions[index].label).join(", ");
+}
+
+function businessHoursText(days: BusinessDay[], startTime: string, endTime: string) {
+  return `${businessDaysText(days)}, ${startTime} to ${endTime}`;
 }
 
 function phoneSetupModeLabel(labels: OwnerCopy, mode?: string | null) {
@@ -497,7 +629,43 @@ function languageLabel(labels: OwnerCopy, language?: string | null) {
   return language || labels.unknown;
 }
 
-function serviceFeeLabel(labels: OwnerCopy, fee?: number | null) {
+function ownerSummaryLanguageLabel(labels: OwnerCopy, language?: string | null) {
+  return language === "es" ? labels.spanish : labels.english;
+}
+
+function ownerSummaryChannelLabel(labels: OwnerCopy, channel?: string | null) {
+  return channel === "email" ? labels.summaryMethodEmail : labels.summaryMethodSms;
+}
+
+function compactPreview(value?: string | null, maxLength = 260) {
+  const compact = (value ?? "").replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 3)}...`;
+}
+
+function mentionedCallerName(transcript?: string | null) {
+  if (!transcript) return null;
+  const callerText = transcript
+    .split(/\n+/)
+    .filter((line) => /^(caller|customer|cliente):/i.test(line.trim()))
+    .map((line) => line.replace(/^(caller|customer|cliente):\s*/i, ""))
+    .join(" ");
+  const match = callerText.match(/\b(?:my name is|this is|i am|i'm|me llamo|soy)\s+([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ' -]{1,48})/i);
+  const name = match?.[1]?.trim().replace(/[.,;:!?].*$/, "") ?? null;
+  if (!name || /^(calling|looking|interested|trying|asking|from|about|de|para|por)\b/i.test(name)) return null;
+  return name;
+}
+
+function callSummary(call: OwnerPortalData["calls"][number], summaries: OwnerPortalData["summaries"], labels: OwnerCopy) {
+  const summary = summaries.find((item) => item.call_session_id === call.id);
+  return summary?.display_summary || summary?.summary || call.outcome || labels.noAiObservations;
+}
+
+function callCallerName(call: OwnerPortalData["calls"][number], labels: OwnerCopy) {
+  return call.customers?.full_name || mentionedCallerName(call.transcript) || labels.newCustomer;
+}
+
+function serviceFeeLabel(fee?: number | null) {
   const value = fee ?? 0;
 
   return new Intl.NumberFormat("en-US", {
@@ -519,6 +687,117 @@ function formatDate(value: string | null | undefined, fallback = "Not set") {
     month: "short",
     year: "numeric"
   }).format(date);
+}
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function callTimestamp(call: OwnerPortalData["calls"][number]) {
+  const time = new Date(call.started_at).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function callDurationSeconds(call: OwnerPortalData["calls"][number], now = new Date()) {
+  const startedAt = new Date(call.started_at);
+  if (Number.isNaN(startedAt.getTime())) return 0;
+
+  if (call.ended_at) {
+    const endedAt = new Date(call.ended_at);
+    if (!Number.isNaN(endedAt.getTime())) {
+      return (endedAt.getTime() - startedAt.getTime()) / 1000;
+    }
+  }
+
+  if (call.status === "active") {
+    return (now.getTime() - startedAt.getTime()) / 1000;
+  }
+
+  return Number(call.qualified_business_seconds ?? 0);
+}
+
+function startOfDay(date: Date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function addDays(date: Date, days: number) {
+  const value = new Date(date);
+  value.setDate(value.getDate() + days);
+  return value;
+}
+
+function monthStartFor(date: Date) {
+  const value = startOfDay(date);
+  value.setDate(1);
+  return value;
+}
+
+function startOfMondayWeek(date: Date) {
+  const value = startOfDay(date);
+  const day = value.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  return addDays(value, mondayOffset);
+}
+
+function currentMonthWeekBounds() {
+  const today = startOfDay(new Date());
+  const monthStart = monthStartFor(today);
+  const nextMonthStart = new Date(monthStart);
+  nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
+
+  return {
+    currentWeekStart: startOfMondayWeek(today),
+    firstWeekStart: startOfMondayWeek(monthStart),
+    monthStart,
+    nextMonthStart,
+    today
+  };
+}
+
+function monthlyCallActivity(calls: OwnerPortalData["calls"], language: Lang, weekStart: Date) {
+  const { monthStart, nextMonthStart, today } = currentMonthWeekBounds();
+  const weekEnd = addDays(weekStart, 7);
+  const rangeStart = new Date(Math.max(weekStart.getTime(), monthStart.getTime()));
+  const rangeEnd = new Date(Math.min(weekEnd.getTime(), nextMonthStart.getTime()));
+  const daysToShow = Math.max(0, Math.round((rangeEnd.getTime() - rangeStart.getTime()) / DAY_MS));
+
+  return Array.from({ length: daysToShow }, (_, index) => {
+    const date = addDays(rangeStart, index);
+    const nextDate = new Date(date);
+    nextDate.setDate(date.getDate() + 1);
+    const count = calls.filter((call) => {
+      const startedAt = new Date(call.started_at);
+      return !Number.isNaN(startedAt.getTime()) && startedAt >= date && startedAt < nextDate;
+    }).length;
+
+    return {
+      active: date.getTime() === today.getTime(),
+      count,
+      dateLabel: new Intl.DateTimeFormat("en-US", { day: "2-digit", month: "2-digit" }).format(date),
+      weekdayLabel: new Intl.DateTimeFormat(language === "es" ? "es-US" : "en-US", { weekday: "short" }).format(date)
+    };
+  });
+}
+
+function latestCall(calls: OwnerPortalData["calls"]) {
+  return [...calls].sort((first, second) => callTimestamp(second) - callTimestamp(first))[0] ?? null;
+}
+
+function activeCall(calls: OwnerPortalData["calls"]) {
+  return calls
+    .filter((call) => call.status === "active")
+    .sort((first, second) => callTimestamp(second) - callTimestamp(first))[0] ?? null;
 }
 
 function recurringServiceLabel(labels: OwnerCopy, customer: Customer) {
@@ -598,6 +877,7 @@ export function OwnerDashboard({
   const [toast, setToast] = useState<string | null>(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [selectedCallWeekStart, setSelectedCallWeekStart] = useState(() => currentMonthWeekBounds().currentWeekStart);
   const [detailBooking, setDetailBooking] = useState<Job | null>(null);
   const [editBooking, setEditBooking] = useState<Job | null>(null);
   const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
@@ -614,6 +894,15 @@ export function OwnerDashboard({
   const currentBookings = useMemo(() => scheduledBookings.filter((job) => !isPastBooking(job)).sort((a, b) => scheduledTime(a) - scheduledTime(b)), [scheduledBookings]);
   const pastBookings = useMemo(() => scheduledBookings.filter(isPastBooking).sort((a, b) => scheduledTime(b) - scheduledTime(a)), [scheduledBookings]);
   const todayJobs = useMemo(() => scheduledBookings.filter(isTodayJob), [scheduledBookings]);
+  const callActivity = useMemo(() => monthlyCallActivity(data.calls, language, selectedCallWeekStart), [data.calls, language, selectedCallWeekStart]);
+  const maxCallCount = Math.max(...callActivity.map((day) => day.count), 1);
+  const callWeekBounds = useMemo(() => currentMonthWeekBounds(), []);
+  const canGoToPreviousCallWeek = selectedCallWeekStart.getTime() > callWeekBounds.firstWeekStart.getTime();
+  const canGoToNextCallWeek = selectedCallWeekStart.getTime() < callWeekBounds.currentWeekStart.getTime();
+  const currentActiveCall = useMemo(() => activeCall(data.calls), [data.calls]);
+  const mostRecentCall = useMemo(() => latestCall(data.calls), [data.calls]);
+  const trackedCall = currentActiveCall ?? mostRecentCall;
+  const trackedCallDuration = trackedCall ? formatDuration(callDurationSeconds(trackedCall)) : "00:00";
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -691,12 +980,11 @@ export function OwnerDashboard({
       {activeTab === "home" ? (
         <div className="grid">
           <div className="grid stats-grid">
-            <Stat featured label={t.totalBookings} value={data.metrics.totalBookings} foot="+ Supabase" icon={<CalendarIcon />} />
+            <Stat featured href={`/owner?lang=${language}&tab=bookings`} label={t.totalBookings} value={data.metrics.totalBookings} foot="" icon={<CalendarIcon />} />
             <Stat label={t.todayJobs} value={data.metrics.todayJobs} foot={t.today} icon={<LeafIcon />} />
             <Stat label={t.revenue} value={formatCurrency(data.metrics.revenue)} foot={t.currentData} icon={<DollarIcon />} />
             <Stat label={t.recovered} value={data.metrics.recoveredCalls} foot={t.aiOutcomes} icon={<MessageIcon />} />
           </div>
-          <PhoneSetupCard data={data} labels={t} />
           <div className="grid two-col">
             <section className="card">
               <h2>{t.agenda}</h2>
@@ -742,24 +1030,57 @@ export function OwnerDashboard({
           <CustomerReminderList data={data} labels={t} />
           <div className="grid three-col">
             <section className="card span-2">
-              <h2>{t.aiCallAnalytics}</h2>
+              <div className="analytics-card-header">
+                <h2>{t.aiCallAnalytics}</h2>
+                <div className="analytics-week-controls">
+                  <button
+                    aria-label={t.previousWeek}
+                    disabled={!canGoToPreviousCallWeek}
+                    onClick={() => setSelectedCallWeekStart((current) => addDays(current, -7))}
+                    type="button"
+                  >
+                    <ChevronLeft strokeWidth={2.4} />
+                  </button>
+                  <button
+                    aria-label={t.nextWeek}
+                    disabled={!canGoToNextCallWeek}
+                    onClick={() =>
+                      setSelectedCallWeekStart((current) => {
+                        const next = addDays(current, 7);
+                        return next.getTime() > callWeekBounds.currentWeekStart.getTime() ? callWeekBounds.currentWeekStart : next;
+                      })
+                    }
+                    type="button"
+                  >
+                    <ChevronRight strokeWidth={2.4} />
+                  </button>
+                </div>
+              </div>
               <div className="bar-chart" aria-label={t.weeklyAiCallActivity}>
-                {[58, 82, 68, 94, 76, 62, 88].map((height, index) => (
-                  <div className="bar-column" key={index}>
-                    <div className={index === 3 ? "bar active" : "bar"} style={{ height: `${height}%` }} />
-                    <span>{["S", "M", "T", "W", "T", "F", "S"][index]}</span>
+                {callActivity.map((day) => (
+                  <div className="bar-column" key={`${day.weekdayLabel}-${day.dateLabel}`}>
+                    <div
+                      className={`bar ${day.count > 0 ? "has-calls" : ""} ${day.active ? "active" : ""}`.trim()}
+                      title={`${day.weekdayLabel} ${day.dateLabel}: ${day.count} ${day.count === 1 ? t.call : t.calls}`}
+                      style={{ height: `${day.count > 0 ? Math.max(18, (day.count / maxCallCount) * 100) : 8}%` }}
+                    />
+                    <span>{day.weekdayLabel}</span>
+                    <small>{day.dateLabel}</small>
+                    <strong>{day.count}</strong>
                   </div>
                 ))}
               </div>
             </section>
             <section className="card tracker-card">
               <h2>{t.anaVoiceAgent}</h2>
-              <div className="timer">01:24:08</div>
-              <p>{t.liveTestWindow}</p>
-              <div className="toolbar">
-                <button className="round-control pause" type="button">II</button>
-                <button className="round-control stop" type="button">S</button>
-              </div>
+              <div className="timer">{trackedCallDuration}</div>
+              <p>{trackedCall ? (currentActiveCall ? t.activeCall : t.lastCall) : t.noCallActivity}</p>
+              {trackedCall ? (
+                <div className="tracker-meta">
+                  <span>{formatPhone(trackedCall.from_phone) ?? t.unknown}</span>
+                  <span>{statusLabel(t, trackedCall.status)}</span>
+                </div>
+              ) : null}
             </section>
           </div>
         </div>
@@ -789,6 +1110,7 @@ export function OwnerDashboard({
       ) : null}
       {activeTab === "quotes" ? <QuotesTab labels={t} quotes={data.quotes} onAction={() => showToast(t.actionSent)} /> : null}
       {activeTab === "messages" ? <MessagesTab data={data} labels={t} /> : null}
+      {activeTab === "settings" ? <SettingsTab data={data} labels={t} onSaved={showToast} /> : null}
       {isBookingModalOpen ? (
         <AddBookingModal
           customers={data.customers}
@@ -851,15 +1173,17 @@ function Stat({
   value,
   foot,
   icon,
+  href,
   featured = false
 }: {
   label: string;
   value: string | number;
-  foot: string;
+  foot?: string;
   icon: React.ReactNode;
+  href?: string;
   featured?: boolean;
 }) {
-  return (
+  const content = (
     <article className={`card metric-card ${featured ? "featured" : ""}`}>
       <div className="icon-stat">
         <div>
@@ -868,9 +1192,19 @@ function Stat({
         </div>
         {icon}
       </div>
-      <div className="stat-foot">{foot}</div>
+      {foot ? <div className="stat-foot">{foot}</div> : null}
     </article>
   );
+
+  if (href) {
+    return (
+      <Link className="metric-card-link" href={href}>
+        {content}
+      </Link>
+    );
+  }
+
+  return content;
 }
 
 function JobList({
@@ -962,19 +1296,19 @@ function PhoneSetupCard({ data, labels }: { data: OwnerPortalData; labels: Owner
       <div className="grid three-col">
         <article className="row-card">
           <strong>{labels.customerWillSee}</strong>
-          <div className="meta">{customerFacingNumber ?? labels.notSet}</div>
+          <div className="meta">{formatPhone(customerFacingNumber) ?? labels.notSet}</div>
         </article>
         <article className="row-card">
           <strong>{labels.anaRoutingNumber}</strong>
-          <div className="meta">{business.twilio_routing_phone ?? labels.notSet}</div>
+          <div className="meta">{formatPhone(business.twilio_routing_phone) ?? labels.notSet}</div>
         </article>
         <article className="row-card">
           <strong>{labels.ownerPrivateNumber}</strong>
-          <div className="meta">{business.owner_transfer_phone ?? data.user.phone ?? labels.notSet}</div>
+          <div className="meta">{formatPhone(business.owner_transfer_phone ?? data.user.phone) ?? labels.notSet}</div>
         </article>
         <article className="row-card">
           <strong>{labels.publicBusinessNumber}</strong>
-          <div className="meta">{business.phone ?? labels.notSet}</div>
+          <div className="meta">{formatPhone(business.phone) ?? labels.notSet}</div>
         </article>
         <article className="row-card">
           <strong>{labels.existingNumberType}</strong>
@@ -983,6 +1317,14 @@ function PhoneSetupCard({ data, labels }: { data: OwnerPortalData; labels: Owner
         <article className="row-card">
           <strong>{labels.portingStatus}</strong>
           <div className="meta">{portingStatusLabel(labels, business.porting_status)}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.summaryLanguage}</strong>
+          <div className="meta">{ownerSummaryLanguageLabel(labels, business.owner_summary_language)}</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.summaryMethod}</strong>
+          <div className="meta">{ownerSummaryChannelLabel(labels, business.owner_summary_channel)}</div>
         </article>
       </div>
       <div className="toolbar" style={{ marginTop: 14 }}>
@@ -995,6 +1337,230 @@ function PhoneSetupCard({ data, labels }: { data: OwnerPortalData; labels: Owner
       </div>
       {mode === "sms_transition" ? <p className="meta" style={{ marginTop: 12 }}>{labels.smsTransitionHelp}</p> : null}
     </section>
+  );
+}
+
+function SettingsSaveButton({ label, savingLabel }: { label: string; savingLabel: string }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="button primary" disabled={pending} type="submit">
+      {pending ? savingLabel : label}
+    </button>
+  );
+}
+
+function useCloseDetailsOnOutside() {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const closeIfOutside = (event: MouseEvent | TouchEvent) => {
+      const details = detailsRef.current;
+      if (!details?.open || !event.target || details.contains(event.target as Node)) return;
+      details.open = false;
+    };
+
+    document.addEventListener("mousedown", closeIfOutside);
+    document.addEventListener("touchstart", closeIfOutside);
+
+    return () => {
+      document.removeEventListener("mousedown", closeIfOutside);
+      document.removeEventListener("touchstart", closeIfOutside);
+    };
+  }, []);
+
+  return detailsRef;
+}
+
+function ServicesDropdown({ initialServices, labels }: { initialServices: ServiceOption[]; labels: OwnerCopy }) {
+  const [selectedServices, setSelectedServices] = useState<ServiceOption[]>(initialServices);
+  const detailsRef = useCloseDetailsOnOutside();
+  const selectedText = selectedServices.map((service) => serviceLabel(labels, service)).join(", ");
+
+  const toggleService = (service: ServiceOption) => {
+    setSelectedServices((current) => {
+      if (current.includes(service)) {
+        return current.length === 1 ? current : current.filter((selected) => selected !== service);
+      }
+
+      return [...current, service];
+    });
+  };
+
+  return (
+    <div className="service-dropdown">
+      <details ref={detailsRef}>
+        <summary title={selectedText}>
+          <span>{selectedText}</span>
+        </summary>
+        <div className="service-dropdown-menu">
+          {serviceOptions.map((service: ServiceOption) => {
+            const checked = selectedServices.includes(service);
+
+            return (
+              <label className="service-dropdown-option" key={service}>
+                <input
+                  checked={checked}
+                  name="availableServices"
+                  onChange={() => toggleService(service)}
+                  type="checkbox"
+                  value={service}
+                />
+                <span>{serviceLabel(labels, service)}</span>
+              </label>
+            );
+          })}
+        </div>
+      </details>
+      <small className="field-help">{labels.availableServicesHelp}</small>
+    </div>
+  );
+}
+
+function BusinessHoursDropdowns({ initialText, labels }: { initialText?: string | null; labels: OwnerCopy }) {
+  const parsedHours = parseBusinessHours(initialText);
+  const detailsRef = useCloseDetailsOnOutside();
+  const [selectedDays, setSelectedDays] = useState<BusinessDay[]>(parsedHours.days);
+  const [startTime, setStartTime] = useState(parsedHours.startTime);
+  const [endTime, setEndTime] = useState(parsedHours.endTime);
+  const selectedDayText = selectedDays.map((day) => businessDayOptions.find((option) => option.value === day)?.shortLabel).filter(Boolean).join(", ");
+
+  const toggleDay = (day: BusinessDay) => {
+    setSelectedDays((current) => {
+      if (current.includes(day)) {
+        return current.length === 1 ? current : current.filter((selected) => selected !== day);
+      }
+
+      const next = [...current, day];
+      return businessDayOptions.map((option) => option.value).filter((option) => next.includes(option));
+    });
+  };
+
+  return (
+    <div className="business-hours-dropdowns">
+      <input name="businessHoursText" type="hidden" value={businessHoursText(selectedDays, startTime, endTime)} />
+      <div className="field">
+        <span>{labels.businessDays}</span>
+        <div className="service-dropdown compact">
+          <details ref={detailsRef}>
+            <summary title={businessDaysText(selectedDays)}>
+              <span>{selectedDayText}</span>
+            </summary>
+            <div className="service-dropdown-menu">
+              {businessDayOptions.map((day) => {
+                const checked = selectedDays.includes(day.value);
+
+                return (
+                  <label className="service-dropdown-option" key={day.value}>
+                    <input checked={checked} onChange={() => toggleDay(day.value)} type="checkbox" />
+                    <span>{day.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </details>
+        </div>
+      </div>
+      <label className="field">
+        <span>{labels.businessStartTime}</span>
+        <select onChange={(event) => setStartTime(event.target.value)} value={startTime}>
+          {businessTimeOptions.map((time) => (
+            <option key={time} value={time}>
+              {time}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>{labels.businessEndTime}</span>
+        <select onChange={(event) => setEndTime(event.target.value)} value={endTime}>
+          {businessTimeOptions.map((time) => (
+            <option key={time} value={time}>
+              {time}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function SummarySettingsForm({
+  business,
+  labels,
+  onSaved
+}: {
+  business: OwnerPortalData["business"];
+  labels: OwnerCopy;
+  onSaved: (message: string) => void;
+}) {
+  const [state, formAction] = useActionState<OwnerSettingsState, FormData>(updateOwnerSettings, {});
+  const selectedServices = businessServices(business);
+
+  useEffect(() => {
+    if (state.success) {
+      onSaved(state.success || labels.settingsSaved);
+    }
+  }, [labels.settingsSaved, onSaved, state.success]);
+
+  return (
+    <section className="card owner-settings-card">
+      <div className="section-card-header">
+        <div>
+          <h2>{labels.ownerSummarySettings}</h2>
+          <p className="meta">{labels.ownerSummarySettingsSubtitle}</p>
+        </div>
+      </div>
+      <form action={formAction}>
+        <div className="form-grid">
+          <label className="field">
+            <span>{labels.summaryLanguage}</span>
+            <select defaultValue={business.owner_summary_language ?? "en"} name="ownerSummaryLanguage">
+              <option value="en">{labels.english}</option>
+              <option value="es">{labels.spanish}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.summaryMethod}</span>
+            <select defaultValue={business.owner_summary_channel ?? "sms"} name="ownerSummaryChannel">
+              <option value="sms">{labels.summaryMethodSms}</option>
+              <option value="email">{labels.summaryMethodEmail}</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>{labels.bookingTimeZone}</span>
+            <select defaultValue={business.booking_time_zone ?? "America/Chicago"} name="bookingTimeZone">
+              {timeZoneOptions.map((timeZone) => (
+                <option key={timeZone} value={timeZone}>
+                  {timeZone}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field full compact-field">
+            <BusinessHoursDropdowns initialText={business.business_hours_text} labels={labels} />
+          </div>
+          <div className="field full">
+            <span>{labels.availableServices}</span>
+            <ServicesDropdown initialServices={selectedServices} labels={labels} />
+          </div>
+        </div>
+        {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
+        {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
+        <div className="toolbar" style={{ marginTop: 16 }}>
+          <SettingsSaveButton label={labels.saveSettings} savingLabel={labels.saving} />
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function SettingsTab({ data, labels, onSaved }: { data: OwnerPortalData; labels: OwnerCopy; onSaved: (message: string) => void }) {
+  return (
+    <div className="grid">
+      <SummarySettingsForm business={data.business} labels={labels} onSaved={onSaved} />
+      <PhoneSetupCard data={data} labels={labels} />
+    </div>
   );
 }
 
@@ -1251,11 +1817,11 @@ function CustomersTab({
                   <td>
                     <span className="customer-name">{customer.full_name}</span>
                   </td>
-                  <td>{customer.phone ?? labels.missing}</td>
+                  <td>{formatPhone(customer.phone) ?? labels.missing}</td>
                   <td>{formatDate(customer.created_at, labels.notSet)}</td>
                   <td>{serviceLabel(labels, customerServices[customer.id])}</td>
                   <td>{recurringServiceLabel(labels, customer)}</td>
-                  <td>{serviceFeeLabel(labels, customer.service_fee)}</td>
+                  <td>{serviceFeeLabel(customer.service_fee)}</td>
                   <td>{languageLabel(labels, customer.preferred_language)}</td>
                   <td>{customer.address ?? labels.noAddress}</td>
                   <td>
@@ -1318,17 +1884,72 @@ function QuotesTab({ quotes, labels, onAction }: { quotes: OwnerPortalData["quot
 }
 
 function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
+  const recentSummaries = data.summaries.slice(0, 8);
+
   return (
     <div className="grid two-col">
+      <section className="card span-2">
+        <div className="section-card-header">
+          <div>
+            <h2>{labels.anaCallLog}</h2>
+            <p className="meta">{labels.anaCallLogSubtitle}</p>
+          </div>
+        </div>
+        <div className="call-log-list">
+          {data.calls.length ? (
+            data.calls.map((call) => {
+              const summary = callSummary(call, data.summaries, labels);
+              const mentionedName = mentionedCallerName(call.transcript);
+
+              return (
+                <article className="call-log-card" key={call.id}>
+                  <div className="call-log-card-header">
+                    <div>
+                      <strong>{callCallerName(call, labels)}</strong>
+                      <span>{formatDateTime(call.started_at)}</span>
+                    </div>
+                    <span className="pill info">{statusLabel(labels, call.status)}</span>
+                  </div>
+                  <div className="call-meta-grid">
+                    <div>
+                      <span>{labels.phoneNumber}</span>
+                      <strong>{formatPhone(call.from_phone ?? call.customers?.phone) ?? labels.notSet}</strong>
+                    </div>
+                    <div>
+                      <span>{labels.caller}</span>
+                      <strong>{customerName(call.customers, labels.newCustomer)}</strong>
+                    </div>
+                    {mentionedName && !call.customers?.full_name ? (
+                      <div>
+                        <span>{labels.mentionedName}</span>
+                        <strong>{mentionedName}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="call-summary-panel">
+                    <span>{labels.callSummary}</span>
+                    <p>{compactPreview(summary, 420)}</p>
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <div className="empty-state">{labels.noCalls}</div>
+          )}
+        </div>
+      </section>
       <section className="card">
-        <h2>{labels.messages}</h2>
+        <h2>{labels.latestMessages}</h2>
         <div className="list">
           {data.messages.map((message) => (
             <article className="row-card" key={message.id}>
               <strong>
                 {message.direction} - {message.channel} - {customerName(message.customers, labels.newCustomer)}
               </strong>
-              <div className="meta">{message.body}</div>
+              <div className="meta">
+                {formatPhone(message.from_phone) ? `${formatPhone(message.from_phone)} - ` : ""}
+                {message.body}
+              </div>
             </article>
           ))}
         </div>
@@ -1336,10 +1957,10 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
       <section className="card">
         <h2>{labels.aiSummaries}</h2>
         <div className="list">
-          {data.summaries.map((summary) => (
+          {recentSummaries.map((summary) => (
             <article className="row-card" key={summary.id}>
-              <strong>{summary.action_needed ?? labels.summary}</strong>
-              <div className="meta">{summary.summary}</div>
+              <strong>{summary.display_action_needed ?? summary.action_needed ?? customerName(summary.customers, labels.summary)}</strong>
+              <div className="meta">{summary.display_summary ?? summary.summary}</div>
             </article>
           ))}
         </div>
@@ -1363,12 +1984,12 @@ function CustomerDetailsModal({
 }) {
   const details = [
     { label: labels.fullName, value: customer.full_name },
-    { label: labels.phone, value: customer.phone ?? labels.missing },
+    { label: labels.phone, value: formatPhone(customer.phone) ?? labels.missing },
     { label: labels.email, value: customer.email ?? labels.missing },
     { label: labels.joinedOn, value: formatDate(customer.created_at, labels.notSet) },
     { label: labels.service, value: serviceLabel(labels, service) },
     { label: labels.recurringService, value: recurringServiceLabel(labels, customer) },
-    { label: labels.serviceFee, value: serviceFeeLabel(labels, customer.service_fee) },
+    { label: labels.serviceFee, value: serviceFeeLabel(customer.service_fee) },
     { label: labels.preferredLanguage, value: languageLabel(labels, customer.preferred_language) },
     { label: labels.source, value: sourceLabel(labels, customer.referral_source) },
     { label: labels.address, value: customer.address ?? labels.noAddress },

@@ -2,12 +2,12 @@
 
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { onboardOwner, updateBusinessPhoneSetup } from "@/app/actions/admin";
+import { onboardOwner, updateAdminBusinessName, updateAdminOwnerName, updateBusinessPhoneSetup } from "@/app/actions/admin";
 import { CalendarIcon, DollarIcon, MessageIcon, UsersIcon } from "@/components/ui/icons";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency } from "@/lib/format";
 import type { AdminAccount, AdminPortalData } from "@/lib/admin-data";
-import type { ExistingNumberKind, PhoneSetupMode, PortingStatus, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
+import type { ExistingNumberKind, PhoneSetupMode, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
 
 export type AdminTab = "overview" | "onboarding" | "accounts" | "phone" | "usage" | "billing" | "playbook";
 
@@ -40,13 +40,15 @@ const existingNumberKindLabels: Record<ExistingNumberKind, string> = {
   unknown: "Not confirmed"
 };
 
-const portingStatusLabels: Record<PortingStatus, string> = {
-  blocked: "Blocked",
-  collecting_info: "Collecting port info",
-  completed: "Port completed",
-  not_started: "Not started",
-  submitted: "Submitted to Twilio"
-};
+const timeZoneOptions = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu"
+];
 
 const setupScenarios: Array<{
   mode: PhoneSetupMode;
@@ -192,7 +194,9 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
             const billing = account.manual_billing_accounts?.[0];
             return (
               <tr key={account.id}>
-                <td>{account.name}</td>
+                <td>
+                  <BusinessNameEditor account={account} />
+                </td>
                 <td>
                   <OwnerList account={account} />
                 </td>
@@ -228,6 +232,44 @@ function SaveSetupButton() {
     <button className="button primary" disabled={pending} type="submit">
       {pending ? "Saving..." : "Save setup"}
     </button>
+  );
+}
+
+function InlineNameSaveButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button className="inline-edit-save" disabled={pending} type="submit">
+      {pending ? "Saving" : "Save"}
+    </button>
+  );
+}
+
+function BusinessNameEditor({ account }: { account: AdminAccount }) {
+  const [state, formAction] = useActionState(updateAdminBusinessName, {});
+
+  return (
+    <form action={formAction} className="inline-edit-form">
+      <input name="businessId" type="hidden" value={account.id} />
+      <input className="inline-edit-input" defaultValue={account.name} maxLength={120} name="businessName" required />
+      <InlineNameSaveButton />
+      {state.error ? <span className="inline-edit-error">{state.error}</span> : null}
+      {state.success ? <span className="inline-edit-success">{state.success}</span> : null}
+    </form>
+  );
+}
+
+function OwnerNameEditor({ owner }: { owner: AdminAccount["owners"][number] }) {
+  const [state, formAction] = useActionState(updateAdminOwnerName, {});
+
+  return (
+    <form action={formAction} className="inline-edit-form">
+      <input name="ownerId" type="hidden" value={owner.id} />
+      <input className="inline-edit-input" defaultValue={owner.full_name ?? ""} maxLength={120} name="ownerName" placeholder="Owner name" required />
+      <InlineNameSaveButton />
+      {state.error ? <span className="inline-edit-error">{state.error}</span> : null}
+      {state.success ? <span className="inline-edit-success">{state.success}</span> : null}
+    </form>
   );
 }
 
@@ -283,6 +325,38 @@ function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
               <textarea
                 defaultValue="Speak as Ana. Use English for customer conversations and owner summaries. Require owner approval before final quotes."
                 name="aiInstructions"
+              />
+            </label>
+            <label className="field">
+              <span>Owner summary language</span>
+              <select defaultValue="en" name="ownerSummaryLanguage">
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Owner summary method</span>
+              <select defaultValue="sms" name="ownerSummaryChannel">
+                <option value="sms">SMS text</option>
+                <option value="email">Email</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Booking time zone</span>
+              <select defaultValue="America/Chicago" name="bookingTimeZone">
+                {timeZoneOptions.map((timeZone) => (
+                  <option key={timeZone} value={timeZone}>
+                    {timeZone}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Business hours</span>
+              <input
+                defaultValue="Monday through Friday, 8:00 AM to 5:00 PM"
+                maxLength={240}
+                name="businessHoursText"
               />
             </label>
           </div>
@@ -382,7 +456,7 @@ function OwnerList({ account }: { account: AdminAccount }) {
     <div className="mini-stack">
       {account.owners.map((owner) => (
         <div key={owner.id}>
-          <strong>{owner.full_name ?? owner.email ?? "Owner"}</strong>
+          <OwnerNameEditor owner={owner} />
           <div className="meta">{owner.phone ?? owner.email ?? "No contact"}</div>
         </div>
       ))}
@@ -536,6 +610,38 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
               <option value="transition">Transition</option>
               <option value="blocked">Blocked</option>
             </select>
+          </label>
+          <label className="field">
+            <span>Owner summary language</span>
+            <select defaultValue={account.owner_summary_language ?? "en"} name="ownerSummaryLanguage">
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Owner summary method</span>
+            <select defaultValue={account.owner_summary_channel ?? "sms"} name="ownerSummaryChannel">
+              <option value="sms">SMS text</option>
+              <option value="email">Email</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Booking time zone</span>
+            <select defaultValue={account.booking_time_zone ?? "America/Chicago"} name="bookingTimeZone">
+              {timeZoneOptions.map((timeZone) => (
+                <option key={timeZone} value={timeZone}>
+                  {timeZone}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field full">
+            <span>Business hours</span>
+            <input
+              defaultValue={account.business_hours_text ?? "Monday through Friday, 8:00 AM to 5:00 PM"}
+              maxLength={240}
+              name="businessHoursText"
+            />
           </label>
           <label className="field full checkbox-field">
             <input defaultChecked={account.phone_setup_owner_approved} name="phoneSetupOwnerApproved" type="checkbox" />

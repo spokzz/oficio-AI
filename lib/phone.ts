@@ -27,3 +27,19 @@ export function phoneSearchValues(phone: string | null | undefined) {
   const raw = phone?.trim();
   return Array.from(new Set([normalized, raw].filter((value): value is string => Boolean(value))));
 }
+
+export function formatPhone(phone: string | null | undefined) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+
+  const digits = normalized.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `(+1) ${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+
+  return normalized;
+}

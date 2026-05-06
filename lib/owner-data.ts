@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { todayRange } from "@/lib/format";
 import type {
@@ -48,7 +49,225 @@ export type OwnerPortalData = {
   };
 };
 
-export async function getOwnerPortalData(): Promise<OwnerPortalData> {
+type OwnerDisplayLanguage = "en" | "es";
+type SummaryTranslation = Pick<AiSummary, "display_action_needed" | "display_summary">;
+type SummaryTranslationRow = {
+  action_needed: string | null;
+  ai_summary_id: string;
+  language: OwnerDisplayLanguage;
+  summary: string;
+};
+
+const SUMMARY_TRANSLATION_MODEL = process.env.OPENAI_SUMMARY_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.4-mini";
+
+function ownerSummaryLanguage(language?: string | null): OwnerDisplayLanguage {
+  return String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
+}
+
+function responseOutputText(payload: unknown) {
+  if (typeof payload !== "object" || payload === null) return "";
+  const response = payload as { output?: Array<{ content?: Array<{ text?: string; type?: string }> }>; output_text?: string };
+  if (typeof response.output_text === "string") return response.output_text.trim();
+
+  return (response.output || [])
+    .flatMap((item) => item.content || [])
+    .filter((part) => part.type === "output_text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim();
+}
+
+function parseJsonArray(value: string) {
+  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const raw = fenced || value;
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) return [];
+
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function translateSummaryBatch(summaries: AiSummary[], language: OwnerDisplayLanguage) {
+  if (!summaries.length || !process.env.OPENAI_API_KEY) return new Map<string, SummaryTranslation>();
+
+  const targetLanguage = language === "es" ? "Spanish as used in the United States" : "English";
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    body: JSON.stringify({
+      input: [
+        {
+          content: [
+            {
+              type: "input_text",
+              text: [
+                `Translate these owner call summaries into ${targetLanguage}.`,
+                "Return only a JSON array. Each item must have id, summary, and action_needed.",
+                "Preserve names, phone numbers, dates, times, prices, services, and addresses exactly.",
+                "Do not add facts. Keep each summary concise.",
+                JSON.stringify(
+                  summaries.map((summary) => ({
+                    action_needed: summary.action_needed,
+                    id: summary.id,
+                    summary: summary.summary
+                  }))
+                )
+              ].join("\n")
+            }
+          ],
+          role: "user"
+        }
+      ],
+      max_output_tokens: 1800,
+      model: SUMMARY_TRANSLATION_MODEL,
+      store: false
+    }),
+    headers: {
+      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "content-type": "application/json"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) return new Map<string, SummaryTranslation>();
+
+  const payload = await response.json().catch(() => ({}));
+  const rows = parseJsonArray(responseOutputText(payload));
+  const translations = new Map<string, SummaryTranslation>();
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as { action_needed?: unknown; id?: unknown; summary?: unknown };
+    const id = typeof item.id === "string" ? item.id : "";
+    const summary = typeof item.summary === "string" ? item.summary.trim() : "";
+    if (!id || !summary) continue;
+    translations.set(id, {
+      display_action_needed: typeof item.action_needed === "string" ? item.action_needed.trim() : null,
+      display_summary: summary
+    });
+  }
+
+  return translations;
+}
+
+async function cachedSummaryTranslations({
+  businessId,
+  language,
+  summaryIds,
+  supabase
+}: {
+  businessId: string;
+  language: OwnerDisplayLanguage;
+  summaryIds: string[];
+  supabase: SupabaseClient;
+}) {
+  if (!summaryIds.length) return new Map<string, SummaryTranslation>();
+
+  const { data, error } = await supabase
+    .from("ai_summary_translations")
+    .select("ai_summary_id,summary,action_needed,language")
+    .eq("business_id", businessId)
+    .eq("language", language)
+    .in("ai_summary_id", summaryIds);
+
+  if (error) {
+    console.error("Could not read cached summary translations:", error.message);
+    return new Map<string, SummaryTranslation>();
+  }
+
+  const translations = new Map<string, SummaryTranslation>();
+  for (const row of (data ?? []) as SummaryTranslationRow[]) {
+    translations.set(row.ai_summary_id, {
+      display_action_needed: row.action_needed,
+      display_summary: row.summary
+    });
+  }
+
+  return translations;
+}
+
+async function cacheSummaryTranslations({
+  businessId,
+  language,
+  translations,
+  supabase
+}: {
+  businessId: string;
+  language: OwnerDisplayLanguage;
+  translations: Map<string, SummaryTranslation>;
+  supabase: SupabaseClient;
+}) {
+  const rows = [...translations.entries()]
+    .filter(([, translation]) => Boolean(translation.display_summary))
+    .map(([summaryId, translation]) => ({
+      action_needed: translation.display_action_needed ?? null,
+      ai_summary_id: summaryId,
+      business_id: businessId,
+      language,
+      summary: translation.display_summary as string
+    }));
+
+  if (!rows.length) return;
+
+  const { error } = await supabase.from("ai_summary_translations").upsert(rows, { onConflict: "ai_summary_id,language" });
+  if (error) console.error("Could not cache summary translations:", error.message);
+}
+
+async function localizeSummaries({
+  businessId,
+  language,
+  summaries,
+  supabase
+}: {
+  businessId: string;
+  language: OwnerDisplayLanguage;
+  summaries: AiSummary[];
+  supabase: SupabaseClient;
+}) {
+  const localized = summaries.map((summary) => ({
+    ...summary,
+    display_action_needed: summary.action_needed,
+    display_summary: summary.summary
+  }));
+  const needsTranslation = localized.filter((summary) => ownerSummaryLanguage(summary.summary_language) !== language);
+  const cached = await cachedSummaryTranslations({
+    businessId,
+    language,
+    summaryIds: needsTranslation.map((summary) => summary.id),
+    supabase
+  });
+
+  for (const summary of needsTranslation) {
+    const translated = cached.get(summary.id);
+    if (translated?.display_summary) {
+      summary.display_summary = translated.display_summary;
+      summary.display_action_needed = translated.display_action_needed ?? null;
+    }
+  }
+
+  const missingTranslations = needsTranslation.filter((summary) => !cached.has(summary.id));
+
+  for (let index = 0; index < missingTranslations.length; index += 12) {
+    const batch = missingTranslations.slice(index, index + 12);
+    const translations = await translateSummaryBatch(batch, language);
+    await cacheSummaryTranslations({ businessId, language, supabase, translations });
+
+    for (const summary of batch) {
+      const translated = translations.get(summary.id);
+      if (translated?.display_summary) {
+        summary.display_summary = translated.display_summary;
+        summary.display_action_needed = translated.display_action_needed ?? null;
+      }
+    }
+  }
+
+  return localized;
+}
+
+export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage = "es"): Promise<OwnerPortalData> {
   const supabase = await createClient();
   const {
     data: { user }
@@ -74,6 +293,11 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
   if (!membership) redirect("/owner/no-business");
 
   const businessId = membership.business_id as string;
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const nextMonthStart = new Date(monthStart);
+  nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
 
   const [
     businessResult,
@@ -113,8 +337,13 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
       .select("*, customers(full_name, phone)")
       .eq("business_id", businessId)
       .order("started_at", { ascending: false })
-      .limit(8),
-    supabase.from("ai_summaries").select("*").eq("business_id", businessId).order("created_at", { ascending: false }).limit(8)
+      .limit(500),
+    supabase
+      .from("ai_summaries")
+      .select("*, customers(full_name, phone)")
+      .eq("business_id", businessId)
+      .order("created_at", { ascending: false })
+      .limit(200)
   ]);
 
   if (!businessResult.data) redirect("/owner/no-business");
@@ -204,14 +433,23 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
 
   const { start, end } = todayRange();
   const scheduledJobs = jobs.filter((job) => job.scheduled_start && job.status !== "canceled");
+  const todayScheduledJobs = scheduledJobs.filter((job) => job.scheduled_start && job.scheduled_start >= start && job.scheduled_start < end);
+  const currentMonthCalls = calls.filter((call) => call.started_at >= monthStart.toISOString() && call.started_at < nextMonthStart.toISOString());
 
   const metrics = {
-    totalBookings: scheduledJobs.length,
-    todayJobs: scheduledJobs.filter((job) => job.scheduled_start && job.scheduled_start >= start && job.scheduled_start < end).length,
-    revenue: jobs.reduce((sum, job) => sum + Number(job.final_value ?? job.estimated_value ?? 0), 0),
-    recoveredCalls: calls.filter((call) => call.outcome?.toLowerCase().includes("book")).length,
+    totalBookings: todayScheduledJobs.length,
+    todayJobs: todayScheduledJobs.length,
+    revenue: todayScheduledJobs.reduce((sum, job) => sum + Number(job.final_value ?? job.estimated_value ?? 0), 0),
+    recoveredCalls: currentMonthCalls.filter((call) => call.outcome?.toLowerCase().includes("book")).length,
     pendingQuotes: quotes.filter((quote) => quote.status === "needs_owner_approval" || quote.status === "draft").length
   };
+
+  const summaries = await localizeSummaries({
+    businessId,
+    language: displayLanguage,
+    summaries: (summariesResult.data ?? []) as AiSummary[],
+    supabase
+  });
 
   return {
     user: profile,
@@ -223,7 +461,7 @@ export async function getOwnerPortalData(): Promise<OwnerPortalData> {
     quotes,
     messages: (messagesResult.data ?? []) as Message[],
     calls,
-    summaries: (summariesResult.data ?? []) as AiSummary[],
+    summaries,
     customerServices,
     customerLastServiceAt,
     customerReminders,

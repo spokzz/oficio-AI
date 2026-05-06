@@ -11,12 +11,13 @@ import {
   Home,
   LogOut,
   MessagesSquare,
+  Settings,
   Users,
   type LucideIcon
 } from "lucide-react";
 import { signOutUser } from "@/app/actions/auth";
 
-type NavIcon = "bookings" | "customers" | "home" | "messages" | "quotes";
+type NavIcon = "bookings" | "customers" | "home" | "messages" | "quotes" | "settings";
 
 type NavItem = {
   label: string;
@@ -30,7 +31,8 @@ const navIcons: Record<NavIcon, LucideIcon> = {
   customers: Users,
   home: Home,
   messages: MessagesSquare,
-  quotes: FileText
+  quotes: FileText,
+  settings: Settings
 };
 
 function NavItemIcon({ icon }: { icon?: NavIcon }) {

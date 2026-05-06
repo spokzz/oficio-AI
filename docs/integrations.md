@@ -7,7 +7,7 @@ Inbound calls should hit a webhook that returns TwiML with `<Connect><Stream>` t
 Implemented webhook routes:
 
 - `POST /api/twilio/voice` - inbound voice routing and known-caller bypass.
-- `POST /api/twilio/voice/screen` - one-question unknown caller screening.
+- `POST /api/twilio/voice/screen` - one-question unknown caller screening when the realtime gateway is not configured.
 - `POST /api/twilio/voice/status` - call completion updates and qualified business minute usage.
 
 Configure each Twilio number voice webhook to `POST /api/twilio/voice`. Configure Twilio call status callbacks to `POST /api/twilio/voice/status`.
@@ -17,17 +17,37 @@ Each business should set:
 - `businesses.twilio_routing_phone` - the business-specific Twilio number owners forward calls to.
 - `businesses.owner_transfer_phone` or owner `users.phone` - the cellphone used when Ana transfers personal/vendor calls.
 
-If `OFICIO_VOICE_STREAM_URL` is set, business/customer calls are connected to the realtime voice gateway with `businessId` and `callSessionId` stream parameters. Without it, the webhook records the call and returns a placeholder TwiML response.
+If `OFICIO_VOICE_STREAM_URL` is set, business/customer and unknown calls are connected to the realtime voice gateway with `businessId`, `callSessionId`, `fromPhone`, and `toPhone` stream parameters. Without it, known customer calls get a placeholder response and unknown callers use the basic Twilio speech screening fallback.
 
 ## OpenAI Realtime
 
-The voice gateway should:
+Implemented gateway:
 
-- Create one realtime session per call.
-- Set `Ana` style instructions.
-- Pass business settings as session context.
-- Use tool calls for availability, service radius, quote draft, and booking creation.
-- Persist transcript, detected language, call outcome, and Spanish owner summary.
+- `npm run voice:realtime` starts `scripts/voice-realtime-server.mjs`.
+- Twilio Media Streams connect to `ws(s)://YOUR_GATEWAY/twilio/voice`.
+- The gateway bridges Twilio PCMU audio to OpenAI Realtime with `OPENAI_REALTIME_MODEL` defaulting to `gpt-realtime-mini`.
+- Ana can check open slots, book confirmed jobs in `jobs`, create/update phone customers, and transfer live calls to the owner through Twilio.
+
+Required voice gateway environment:
+
+- `OPENAI_API_KEY`
+- `OPENAI_REALTIME_MODEL=gpt-realtime-mini`
+- `OPENAI_REALTIME_VOICE=marin`
+- `OFICIO_VOICE_STREAM_URL=wss://YOUR_GATEWAY/twilio/voice`
+- `OFICIO_VOICE_GATEWAY_PORT=8787` for the local gateway process
+- `OFICIO_BOOKING_TIME_ZONE=America/Chicago` optional fallback when a business has no saved booking time zone
+- `OFICIO_BUSINESS_HOURS_TEXT` optional fallback when a business has no saved customer-facing hours text
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_PHONE` for owner SMS summaries
+- `RESEND_API_KEY` and `OFICIO_SUMMARY_FROM_EMAIL` for owner email summaries
+
+The voice gateway should continue to evolve to:
+
+- Add service radius/geocoding checks before confirming out-of-area bookings.
+- Create owner-reviewed quote drafts from richer service intake.
 
 ## Twilio SMS/MMS
 

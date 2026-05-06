@@ -15,12 +15,28 @@ type PhoneSetupState = {
   success?: string;
 };
 
+type InlineEditState = {
+  error?: string;
+  success?: string;
+};
+
 const trades = ["landscaping", "roofing", "plumbing", "cleaning", "hvac", "other"] as const;
 const phoneSetupModes = ["twilio_number", "call_forwarding", "port_existing", "sms_transition"] as const;
 const voiceSetupStatuses = ["not_started", "pending", "active", "blocked"] as const;
 const smsSetupStatuses = ["not_started", "pending", "active", "transition", "blocked"] as const;
 const existingNumberKinds = ["unknown", "business", "personal", "mixed"] as const;
 const portingStatuses = ["not_started", "collecting_info", "submitted", "completed", "blocked"] as const;
+const ownerSummaryLanguages = ["en", "es"] as const;
+const ownerSummaryChannels = ["sms", "email"] as const;
+
+function isValidTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function requirePlatformAdmin() {
   const supabase = await createClient();
@@ -56,6 +72,10 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
   const ownerTransferPhone = normalizePhone(String(formData.get("ownerTransferPhone") ?? ""));
   const messagingServiceSid = String(formData.get("messagingServiceSid") ?? "").trim();
   const phoneSetupNotes = String(formData.get("phoneSetupNotes") ?? "").trim();
+  const ownerSummaryLanguage = String(formData.get("ownerSummaryLanguage") ?? "en");
+  const ownerSummaryChannel = String(formData.get("ownerSummaryChannel") ?? "sms");
+  const bookingTimeZone = String(formData.get("bookingTimeZone") ?? "America/Chicago").trim();
+  const businessHoursText = String(formData.get("businessHoursText") ?? "Monday through Friday, 8:00 AM to 5:00 PM").trim();
   const ownerApproved = formData.get("phoneSetupOwnerApproved") === "on";
 
   if (!businessName || !ownerEmail) {
@@ -84,6 +104,22 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
 
   if (phoneSetupMode === "port_existing" && existingNumberKind !== "business") {
     return { error: "Only port a dedicated business number. Use SMS transition for personal or mixed numbers." };
+  }
+
+  if (!ownerSummaryLanguages.includes(ownerSummaryLanguage as (typeof ownerSummaryLanguages)[number])) {
+    return { error: "Choose a valid owner summary language." };
+  }
+
+  if (!ownerSummaryChannels.includes(ownerSummaryChannel as (typeof ownerSummaryChannels)[number])) {
+    return { error: "Choose a valid owner summary method." };
+  }
+
+  if (!bookingTimeZone || !isValidTimeZone(bookingTimeZone)) {
+    return { error: "Choose a valid booking time zone." };
+  }
+
+  if (!businessHoursText || businessHoursText.length > 240) {
+    return { error: "Enter business hours under 240 characters." };
   }
 
   const admin = await requirePlatformAdmin();
@@ -161,7 +197,10 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
       porting_status: phoneSetupMode === "port_existing" ? "collecting_info" : "not_started",
       phone_setup_owner_approved: ownerApproved,
       phone_setup_notes: phoneSetupNotes || null,
-      owner_summary_language: "en",
+      owner_summary_language: ownerSummaryLanguage,
+      owner_summary_channel: ownerSummaryChannel,
+      booking_time_zone: bookingTimeZone,
+      business_hours_text: businessHoursText,
       ai_voice_name: "Ana",
       ai_disclosure: aiInstructions || "Hi, this is Ana, the AI assistant for this business. How can I help?"
     })
@@ -238,6 +277,10 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
   const ownerTransferPhone = normalizePhone(String(formData.get("ownerTransferPhone") ?? ""));
   const messagingServiceSid = String(formData.get("messagingServiceSid") ?? "").trim();
   const phoneSetupNotes = String(formData.get("phoneSetupNotes") ?? "").trim();
+  const ownerSummaryLanguage = String(formData.get("ownerSummaryLanguage") ?? "en");
+  const ownerSummaryChannel = String(formData.get("ownerSummaryChannel") ?? "sms");
+  const bookingTimeZone = String(formData.get("bookingTimeZone") ?? "America/Chicago").trim();
+  const businessHoursText = String(formData.get("businessHoursText") ?? "Monday through Friday, 8:00 AM to 5:00 PM").trim();
   const ownerApproved = formData.get("phoneSetupOwnerApproved") === "on";
 
   if (!businessId) {
@@ -272,6 +315,22 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
     return { error: "Only port a dedicated business number. Use SMS transition for personal or mixed numbers." };
   }
 
+  if (!ownerSummaryLanguages.includes(ownerSummaryLanguage as (typeof ownerSummaryLanguages)[number])) {
+    return { error: "Choose a valid owner summary language." };
+  }
+
+  if (!ownerSummaryChannels.includes(ownerSummaryChannel as (typeof ownerSummaryChannels)[number])) {
+    return { error: "Choose a valid owner summary method." };
+  }
+
+  if (!bookingTimeZone || !isValidTimeZone(bookingTimeZone)) {
+    return { error: "Choose a valid booking time zone." };
+  }
+
+  if (!businessHoursText || businessHoursText.length > 240) {
+    return { error: "Enter business hours under 240 characters." };
+  }
+
   const admin = await requirePlatformAdmin();
   if ("error" in admin) {
     return { error: admin.error };
@@ -287,6 +346,10 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
       voice_setup_status: voiceSetupStatus,
       sms_setup_status: smsSetupStatus,
       messaging_service_sid: messagingServiceSid || null,
+      owner_summary_channel: ownerSummaryChannel,
+      owner_summary_language: ownerSummaryLanguage,
+      booking_time_zone: bookingTimeZone,
+      business_hours_text: businessHoursText,
       existing_number_kind: existingNumberKind,
       porting_status: phoneSetupMode === "port_existing" ? portingStatus : "not_started",
       phone_setup_owner_approved: ownerApproved,
@@ -302,4 +365,62 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
   revalidatePath("/owner");
 
   return { success: "Phone setup saved." };
+}
+
+export async function updateAdminBusinessName(_state: InlineEditState, formData: FormData): Promise<InlineEditState> {
+  const businessId = String(formData.get("businessId") ?? "").trim();
+  const businessName = String(formData.get("businessName") ?? "").trim();
+
+  if (!businessId) {
+    return { error: "Business id is required." };
+  }
+
+  if (!businessName || businessName.length > 120) {
+    return { error: "Enter a business name under 120 characters." };
+  }
+
+  const admin = await requirePlatformAdmin();
+  if ("error" in admin) {
+    return { error: admin.error };
+  }
+
+  const { error } = await admin.supabase.from("businesses").update({ name: businessName }).eq("id", businessId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/owner");
+
+  return { success: "Business name saved." };
+}
+
+export async function updateAdminOwnerName(_state: InlineEditState, formData: FormData): Promise<InlineEditState> {
+  const ownerId = String(formData.get("ownerId") ?? "").trim();
+  const ownerName = String(formData.get("ownerName") ?? "").trim();
+
+  if (!ownerId) {
+    return { error: "Owner id is required." };
+  }
+
+  if (!ownerName || ownerName.length > 120) {
+    return { error: "Enter an owner name under 120 characters." };
+  }
+
+  const admin = await requirePlatformAdmin();
+  if ("error" in admin) {
+    return { error: admin.error };
+  }
+
+  const { error } = await admin.supabase.from("users").update({ full_name: ownerName }).eq("id", ownerId).eq("role", "owner");
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/owner");
+
+  return { success: "Owner name saved." };
 }

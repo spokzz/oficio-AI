@@ -4,9 +4,9 @@ import { getOwnerPortalData } from "@/lib/owner-data";
 import Link from "next/link";
 
 type OwnerLanguage = "es" | "en";
-type OwnerTab = "home" | "bookings" | "customers" | "quotes" | "messages";
+type OwnerTab = "home" | "bookings" | "customers" | "quotes" | "messages" | "settings";
 
-const ownerTabs: OwnerTab[] = ["home", "bookings", "customers", "quotes", "messages"];
+const ownerTabs: OwnerTab[] = ["home", "bookings", "customers", "quotes", "messages", "settings"];
 
 type OwnerPageProps = {
   searchParams?: Promise<{
@@ -28,7 +28,8 @@ const ownerShellCopy = {
       bookings: "Reservas",
       customers: "Clientes",
       quotes: "Cotizaciones",
-      messages: "Mensajes"
+      messages: "Mensajes",
+      settings: "Configuración"
     },
     signOut: "Cerrar sesión",
     subtitle: "Tu recepcionista AI está tomando llamadas, textos y solicitudes de cotización."
@@ -45,12 +46,18 @@ const ownerShellCopy = {
       bookings: "Bookings",
       customers: "Customers",
       quotes: "Quotes",
-      messages: "Messages"
+      messages: "Messages",
+      settings: "Settings"
     },
     signOut: "Sign out",
     subtitle: "Your AI receptionist is taking calls, texts, and quote requests."
   }
 };
+
+const languageLabels = {
+  en: "English",
+  es: "Español"
+} as const;
 
 function currentGreeting(language: OwnerLanguage) {
   const hour = Number(
@@ -90,9 +97,9 @@ function ownerHref(language: OwnerLanguage, tab: OwnerTab) {
 }
 
 export default async function OwnerPage({ searchParams }: OwnerPageProps) {
-  const data = await getOwnerPortalData();
   const params = await searchParams;
   const language: OwnerLanguage = params?.lang === "es" ? "es" : "en";
+  const data = await getOwnerPortalData(language);
   const activeTab = getOwnerTab(params?.tab);
   const copy = ownerShellCopy[language];
   const firstName = data.user.full_name?.split(" ")[0] ?? (language === "en" ? "Owner" : "Dueño");
@@ -108,7 +115,8 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
         { label: copy.nav.bookings, href: ownerHref(language, "bookings"), icon: "bookings", active: activeTab === "bookings" },
         { label: copy.nav.customers, href: ownerHref(language, "customers"), icon: "customers", active: activeTab === "customers" },
         { label: copy.nav.quotes, href: ownerHref(language, "quotes"), icon: "quotes", active: activeTab === "quotes" },
-        { label: copy.nav.messages, href: ownerHref(language, "messages"), icon: "messages", active: activeTab === "messages" }
+        { label: copy.nav.messages, href: ownerHref(language, "messages"), icon: "messages", active: activeTab === "messages" },
+        { label: copy.nav.settings, href: ownerHref(language, "settings"), icon: "settings", active: activeTab === "settings" }
       ]}
       showSearch={false}
       signOutLabel={copy.signOut}
@@ -117,10 +125,10 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
         activeTab === "home" ? (
           <div className="language-toggle portal-language-toggle" role="group" aria-label="Language">
             <Link className={language === "es" ? "active" : ""} href={ownerHref("es", activeTab)}>
-              Español
+              {languageLabels.es}
             </Link>
             <Link className={language === "en" ? "active" : ""} href={ownerHref("en", activeTab)}>
-              English
+              {languageLabels.en}
             </Link>
           </div>
         ) : null

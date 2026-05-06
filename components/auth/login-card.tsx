@@ -6,16 +6,11 @@ import { useFormStatus } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
 
 type LoginCardProps = {
-  title: string;
-  eyebrow: string;
-  subtitle: string;
-  helper: string;
   action: (state: { error?: string }, formData: FormData) => Promise<{ error?: string }>;
   resetAction: (
     state: { error?: string; success?: string },
     formData: FormData
   ) => Promise<{ error?: string; success?: string }>;
-  submitLabel: string;
   variant?: "owner" | "admin";
   notice?: string;
   children?: ReactNode;
@@ -122,13 +117,8 @@ function HeroTitle({ language, variant }: { language: LoginLanguage; variant: "o
 }
 
 export function LoginCard({
-  title,
-  eyebrow,
-  subtitle,
-  helper,
   action,
   resetAction,
-  submitLabel,
   variant = "owner",
   notice,
   children

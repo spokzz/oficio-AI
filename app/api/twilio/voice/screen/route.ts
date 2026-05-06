@@ -78,7 +78,9 @@ export async function POST(request: Request) {
       screening_result: "unknown_business"
     });
 
-    return twimlResponse(businessFlowTwiml({ callSessionId: callSessionId ?? params.CallSid, context }));
+    return twimlResponse(
+      businessFlowTwiml({ callSessionId: callSessionId ?? params.CallSid, context, fromPhone: params.From, toPhone: params.To })
+    );
   }
 
   await updateCallSessionByProviderId(params.CallSid, {

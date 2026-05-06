@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       toPhone: params.To
     });
 
-    return twimlResponse(businessFlowTwiml({ callSessionId, context }));
+    return twimlResponse(businessFlowTwiml({ callSessionId, context, fromPhone: params.From, toPhone: params.To }));
   }
 
   const callSessionId = await createCallSession({
@@ -85,6 +85,10 @@ export async function POST(request: Request) {
   const actionUrl = new URL("/api/twilio/voice/screen", process.env.TWILIO_WEBHOOK_BASE_URL ?? request.url);
   actionUrl.searchParams.set("callSessionId", callSessionId);
   const prompt = businessScreeningPrompt(context);
+
+  if (process.env.OFICIO_VOICE_STREAM_URL) {
+    return twimlResponse(businessFlowTwiml({ callSessionId, context, fromPhone: params.From, toPhone: params.To }));
+  }
 
   return twimlResponse(
     [

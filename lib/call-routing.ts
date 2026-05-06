@@ -320,10 +320,14 @@ export function transferToOwnerTwiml(context: RoutingContext) {
 
 export function businessFlowTwiml({
   context,
-  callSessionId
+  callSessionId,
+  fromPhone,
+  toPhone
 }: {
   context: RoutingContext;
   callSessionId: string;
+  fromPhone?: string | null;
+  toPhone?: string | null;
 }) {
   const streamUrl = process.env.OFICIO_VOICE_STREAM_URL;
 
@@ -334,6 +338,8 @@ export function businessFlowTwiml({
       `<Stream url="${xmlEscape(streamUrl)}">`,
       `<Parameter name="businessId" value="${xmlEscape(context.business.id)}" />`,
       `<Parameter name="callSessionId" value="${xmlEscape(callSessionId)}" />`,
+      `<Parameter name="fromPhone" value="${xmlEscape(fromPhone)}" />`,
+      `<Parameter name="toPhone" value="${xmlEscape(toPhone)}" />`,
       "</Stream>",
       "</Connect>",
       "</Response>"

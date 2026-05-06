@@ -8,6 +8,7 @@ export type PortingStatus = "not_started" | "collecting_info" | "submitted" | "c
 export type JobStatus = "lead" | "pending" | "confirmed" | "in_progress" | "completed" | "canceled";
 export type QuoteStatus = "draft" | "needs_owner_approval" | "approved" | "sent" | "accepted" | "declined" | "expired";
 export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
+export type OwnerSummaryChannel = "sms" | "email";
 
 export type UserProfile = {
   id: string;
@@ -35,7 +36,11 @@ export type Business = {
   porting_status: PortingStatus;
   phone_setup_owner_approved: boolean;
   base_address: string | null;
+  available_services: string[];
+  booking_time_zone: string;
+  business_hours_text: string;
   owner_summary_language: string;
+  owner_summary_channel: OwnerSummaryChannel;
   ai_voice_name: string;
 };
 
@@ -122,6 +127,8 @@ export type Message = {
   language: string | null;
   body: string;
   media_urls: string[];
+  from_phone: string | null;
+  to_phone: string | null;
   created_at: string;
   customers?: Pick<Customer, "full_name" | "phone"> | null;
 };
@@ -141,15 +148,21 @@ export type CallSession = {
   started_at: string;
   ended_at: string | null;
   outcome: string | null;
+  transcript: string | null;
   customers?: Pick<Customer, "full_name" | "phone"> | null;
 };
 
 export type AiSummary = {
   id: string;
   business_id: string;
+  call_session_id: string | null;
+  customer_id: string | null;
   summary_language: string;
   summary: string;
+  display_summary?: string;
   action_needed: string | null;
+  display_action_needed?: string | null;
   confidence: number | null;
   created_at: string;
+  customers?: Pick<Customer, "full_name" | "phone"> | null;
 };

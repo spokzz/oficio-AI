@@ -32,12 +32,16 @@ create table public.businesses (
   status public.business_status not null default 'onboarding',
   phone text,
   owner_summary_language text not null default 'es',
+  owner_summary_channel text not null default 'sms' check (owner_summary_channel in ('sms', 'email')),
   customer_default_language text not null default 'auto',
   base_address text,
   base_lat numeric(10, 7),
   base_lng numeric(10, 7),
+  available_services text[] not null default array['landscaping', 'mowing', 'tree_cutting', 'yard_cleanup', 'irrigation']::text[],
+  booking_time_zone text not null default 'America/Chicago',
+  business_hours_text text not null default 'Monday through Friday, 8:00 AM to 5:00 PM',
   ai_voice_name text not null default 'Ana',
-  ai_disclosure text not null default 'Hi, this is Ana, the AI assistant for this business. How can I help?',
+  ai_disclosure text not null default 'Hi, this is Ana with this business. How are you today? What service are you looking for?',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -426,4 +430,3 @@ create index messages_business_id_created_at_idx on public.messages(business_id,
 create index call_sessions_business_id_started_at_idx on public.call_sessions(business_id, started_at desc);
 create index ai_summaries_business_id_created_at_idx on public.ai_summaries(business_id, created_at desc);
 create index usage_events_business_id_occurred_at_idx on public.usage_events(business_id, occurred_at desc);
-

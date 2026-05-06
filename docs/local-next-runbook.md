@@ -59,14 +59,51 @@ Open:
 - Owner login: `http://localhost:3000/owner/login`
 - Admin login: `http://localhost:3000/admin/login`
 
-## 6. Test Build
+## 6. Run The Realtime Voice Gateway
+
+For Twilio voice calls, run the WebSocket gateway in a second terminal:
+
+```bash
+npm run voice:realtime
+```
+
+Expose `http://localhost:8787` through your tunnel. The gateway accepts `wss://.../twilio/voice` directly and proxies `/api/twilio/*` HTTP webhooks to the Next.js app running on port 3000.
+
+```bash
+ngrok http 8787
+```
+
+Then set:
+
+```bash
+TWILIO_WEBHOOK_BASE_URL=https://your-tunnel.example
+OFICIO_VOICE_STREAM_URL=wss://your-tunnel.example/twilio/voice
+OFICIO_NEXT_APP_ORIGIN=http://localhost:3000
+OPENAI_API_KEY=your-openai-key
+OPENAI_REALTIME_MODEL=gpt-realtime-mini
+OPENAI_REALTIME_VOICE=marin
+RESEND_API_KEY=optional-for-email-summaries
+OFICIO_SUMMARY_FROM_EMAIL="Ana <ana@yourdomain.com>"
+```
+
+Configure the Twilio number with:
+
+```text
+Voice webhook: https://your-tunnel.example/api/twilio/voice
+Voice status callback: https://your-tunnel.example/api/twilio/voice/status
+SMS webhook: https://your-tunnel.example/api/twilio/sms
+```
+
+Booking time zone and business-hours text are configured per business in Owner Settings or Admin Phone Setup. The gateway only uses `OFICIO_BOOKING_TIME_ZONE` and `OFICIO_BUSINESS_HOURS_TEXT` as fallbacks.
+
+## 7. Test Build
 
 ```bash
 npm run typecheck
 npm run build
 ```
 
-## 7. Current Production Status
+## 8. Current Production Status
 
 Done:
 
@@ -79,13 +116,12 @@ Done:
 - polished login UI
 - owner dashboard
 - admin console
+- Twilio call/text integrations
+- OpenAI realtime voice gateway
 
 Still needed:
 
 - real create/update server actions for bookings, quotes, billing notes, and settings
-- Twilio call/text integrations
-- OpenAI realtime voice gateway
 - photo upload/storage
 - geocoding/radius provider integration
 - deployment environment setup
-

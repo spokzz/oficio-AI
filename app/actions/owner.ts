@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isCustomerSourceOption } from "@/lib/customer-sources";
-import { isServiceOption } from "@/lib/services";
+import { isServiceOption, serviceOptionDefaults } from "@/lib/services";
 import { normalizePhone } from "@/lib/phone";
 import type { ContactClassification } from "@/lib/types";
 
@@ -22,7 +22,23 @@ export type MarkCallState = {
   success?: string;
 };
 
+export type OwnerSettingsState = {
+  error?: string;
+  success?: string;
+};
+
 const callClassificationOptions: ContactClassification[] = ["customer", "personal", "vendor", "spam", "unknown"];
+const ownerSummaryLanguages = ["en", "es"] as const;
+const ownerSummaryChannels = ["sms", "email"] as const;
+
+function isValidTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function customerInput(formData: FormData) {
   const fullName = String(formData.get("fullName") ?? "").trim();
@@ -106,6 +122,61 @@ async function ownerBusinessId() {
   }
 
   return { businessId: membership.business_id as string, supabase };
+}
+
+export async function updateOwnerSettings(_state: OwnerSettingsState, formData: FormData): Promise<OwnerSettingsState> {
+  const ownerSummaryLanguage = String(formData.get("ownerSummaryLanguage") ?? "en");
+  const ownerSummaryChannel = String(formData.get("ownerSummaryChannel") ?? "sms");
+  const bookingTimeZone = String(formData.get("bookingTimeZone") ?? "America/Chicago").trim();
+  const businessHoursText = String(formData.get("businessHoursText") ?? "").trim();
+  const availableServices = formData
+    .getAll("availableServices")
+    .map((service) => String(service))
+    .filter((service, index, services) => services.indexOf(service) === index);
+
+  if (!ownerSummaryLanguages.includes(ownerSummaryLanguage as (typeof ownerSummaryLanguages)[number])) {
+    return { error: "Choose a valid summary language." };
+  }
+
+  if (!ownerSummaryChannels.includes(ownerSummaryChannel as (typeof ownerSummaryChannels)[number])) {
+    return { error: "Choose a valid summary method." };
+  }
+
+  if (!bookingTimeZone || !isValidTimeZone(bookingTimeZone)) {
+    return { error: "Choose a valid booking time zone." };
+  }
+
+  if (!businessHoursText || businessHoursText.length > 240) {
+    return { error: "Enter business hours under 240 characters." };
+  }
+
+  if (!availableServices.length || availableServices.some((service) => !isServiceOption(service))) {
+    return { error: "Choose at least one valid service." };
+  }
+
+  const owner = await ownerBusinessId();
+  if ("error" in owner) {
+    return { error: owner.error };
+  }
+
+  const { error } = await owner.supabase
+    .from("businesses")
+    .update({
+      available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
+      booking_time_zone: bookingTimeZone,
+      business_hours_text: businessHoursText,
+      owner_summary_channel: ownerSummaryChannel,
+      owner_summary_language: ownerSummaryLanguage
+    })
+    .eq("id", owner.businessId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/owner");
+
+  return { success: "Settings saved." };
 }
 
 function bookingTitle(serviceType: string) {
