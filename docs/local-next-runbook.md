@@ -94,7 +94,7 @@ Voice status callback: https://your-tunnel.example/api/twilio/voice/status
 SMS webhook: https://your-tunnel.example/api/twilio/sms
 ```
 
-Booking time zone and business-hours text are configured per business in Owner Settings or Admin Phone Setup. The gateway only uses `OFICIO_BOOKING_TIME_ZONE` and `OFICIO_BUSINESS_HOURS_TEXT` as fallbacks.
+Booking time zone and business-hours text are configured per business in Owner Settings or Admin Phone Setup.
 
 ## 7. Test Build
 

@@ -36,6 +36,11 @@ export type Business = {
   porting_status: PortingStatus;
   phone_setup_owner_approved: boolean;
   base_address: string | null;
+  base_lat: number | null;
+  base_lng: number | null;
+  base_geocoded_at?: string | null;
+  base_geocode_accuracy?: number | null;
+  base_geocode_provider?: string | null;
   available_services: string[];
   booking_time_zone: string;
   business_hours_text: string;
@@ -51,6 +56,17 @@ export type ServiceRadiusRule = {
   allow_outside_radius: boolean;
   require_owner_approval_outside_radius: boolean;
   extra_travel_fee: number;
+};
+
+export type BusinessAvailabilityException = {
+  id: string;
+  business_id: string;
+  title: string;
+  starts_on: string;
+  ends_on: string;
+  message: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ManualBillingAccount = {
@@ -73,6 +89,11 @@ export type Customer = {
   email: string | null;
   preferred_language: string;
   address: string | null;
+  lat: number | null;
+  lng: number | null;
+  geocoded_at?: string | null;
+  geocode_accuracy?: number | null;
+  geocode_provider?: string | null;
   referral_source: string | null;
   recurring_service_type: string | null;
   recurring_interval_weeks: number | null;
@@ -80,6 +101,22 @@ export type Customer = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type CustomerRecurringReminder = {
+  id: string;
+  business_id: string;
+  customer_id: string;
+  service_type: string | null;
+  interval_weeks: number;
+  due_at: string;
+  last_service_at: string | null;
+  status: "due" | "dismissed" | "scheduled" | "stale";
+  generated_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  customers?: Pick<Customer, "full_name" | "phone" | "address"> | null;
 };
 
 export type Job = {
@@ -92,10 +129,16 @@ export type Job = {
   scheduled_start: string | null;
   scheduled_end: string | null;
   address: string | null;
+  lat: number | null;
+  lng: number | null;
+  geocoded_at?: string | null;
+  geocode_accuracy?: number | null;
+  geocode_provider?: string | null;
   estimated_value: number | null;
   final_value: number | null;
   owner_notes: string | null;
   ai_notes: string | null;
+  created_at?: string;
   customers?: Pick<Customer, "full_name" | "phone" | "preferred_language" | "address"> | null;
 };
 

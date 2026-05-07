@@ -5,8 +5,10 @@ import { todayRange } from "@/lib/format";
 import type {
   AiSummary,
   Business,
+  BusinessAvailabilityException,
   CallSession,
   Customer,
+  CustomerRecurringReminder,
   Job,
   ManualBillingAccount,
   Message,
@@ -16,6 +18,7 @@ import type {
 } from "@/lib/types";
 
 export type CustomerReminder = {
+  id: string;
   customerId: string;
   customerName: string;
   serviceType: string | null;
@@ -30,6 +33,7 @@ export type OwnerPortalData = {
   user: UserProfile;
   business: Business;
   radiusRule: ServiceRadiusRule | null;
+  availabilityExceptions: BusinessAvailabilityException[];
   billing: ManualBillingAccount | null;
   jobs: Job[];
   customers: Customer[];
@@ -58,7 +62,7 @@ type SummaryTranslationRow = {
   summary: string;
 };
 
-const SUMMARY_TRANSLATION_MODEL = process.env.OPENAI_SUMMARY_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.4-mini";
+const SUMMARY_TRANSLATION_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-5-nano";
 
 function ownerSummaryLanguage(language?: string | null): OwnerDisplayLanguage {
   return String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
@@ -104,10 +108,11 @@ async function translateSummaryBatch(summaries: AiSummary[], language: OwnerDisp
             {
               type: "input_text",
               text: [
-                `Translate these owner call summaries into ${targetLanguage}.`,
+                `Translate these owner-facing business summaries into ${targetLanguage}.`,
                 "Return only a JSON array. Each item must have id, summary, and action_needed.",
-                "Preserve names, phone numbers, dates, times, prices, services, and addresses exactly.",
-                "Do not add facts. Keep each summary concise.",
+                "Translate all normal human-readable text.",
+                "Preserve names, phone numbers, email addresses, URLs, dates, times, prices, service labels, and physical addresses exactly.",
+                "Do not add facts. Do not remove facts. Keep each translation concise.",
                 JSON.stringify(
                   summaries.map((summary) => ({
                     action_needed: summary.action_needed,
@@ -132,7 +137,11 @@ async function translateSummaryBatch(summaries: AiSummary[], language: OwnerDisp
     method: "POST"
   });
 
-  if (!response.ok) return new Map<string, SummaryTranslation>();
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: { message?: string }; message?: string };
+    console.error("Could not translate owner summaries:", payload.error?.message || payload.message || response.status);
+    return new Map<string, SummaryTranslation>();
+  }
 
   const payload = await response.json().catch(() => ({}));
   const rows = parseJsonArray(responseOutputText(payload));
@@ -293,6 +302,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
   if (!membership) redirect("/owner/no-business");
 
   const businessId = membership.business_id as string;
+  const reminderDueDate = new Date().toISOString().slice(0, 10);
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
@@ -303,16 +313,25 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     businessResult,
     radiusResult,
     billingResult,
+    availabilityExceptionsResult,
     jobsResult,
     customersResult,
     quotesResult,
     messagesResult,
     callsResult,
-    summariesResult
+    summariesResult,
+    remindersResult
   ] = await Promise.all([
     supabase.from("businesses").select("*").eq("id", businessId).single<Business>(),
     supabase.from("service_radius_rules").select("*").eq("business_id", businessId).maybeSingle<ServiceRadiusRule>(),
     supabase.from("manual_billing_accounts").select("*").eq("business_id", businessId).maybeSingle<ManualBillingAccount>(),
+    supabase
+      .from("business_availability_exceptions")
+      .select("*")
+      .eq("business_id", businessId)
+      .gte("ends_on", reminderDueDate)
+      .order("starts_on", { ascending: true })
+      .limit(100),
     supabase
       .from("jobs")
       .select("*, customers(full_name, phone, preferred_language, address)")
@@ -343,7 +362,15 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
       .select("*, customers(full_name, phone)")
       .eq("business_id", businessId)
       .order("created_at", { ascending: false })
-      .limit(200)
+      .limit(200),
+    supabase
+      .from("customer_recurring_reminders")
+      .select("*, customers(full_name, phone, address)")
+      .eq("business_id", businessId)
+      .eq("status", "due")
+      .lte("due_at", reminderDueDate)
+      .order("due_at", { ascending: true })
+      .limit(50)
   ]);
 
   if (!businessResult.data) redirect("/owner/no-business");
@@ -375,7 +402,6 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     }
   }
   const now = new Date();
-  const futureScheduledCustomerIds = new Set<string>();
 
   for (const job of jobs) {
     if (!job.customer_id || !job.scheduled_start || job.status === "canceled") {
@@ -387,10 +413,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
       continue;
     }
 
-    if (scheduled > now) {
-      futureScheduledCustomerIds.add(job.customer_id);
-      continue;
-    }
+    if (scheduled > now) continue;
 
     const existing = customerLastServiceAt[job.customer_id];
     if (!existing || scheduled.getTime() > new Date(existing).getTime()) {
@@ -398,38 +421,17 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     }
   }
 
-  const customerReminders = customers
-    .map<CustomerReminder | null>((customer) => {
-      const intervalWeeks = customer.recurring_interval_weeks;
-      if (!intervalWeeks || futureScheduledCustomerIds.has(customer.id)) {
-        return null;
-      }
-
-      const anchorDate = new Date(customerLastServiceAt[customer.id] ?? customer.created_at);
-      if (Number.isNaN(anchorDate.getTime())) {
-        return null;
-      }
-
-      const dueDate = new Date(anchorDate);
-      dueDate.setDate(dueDate.getDate() + intervalWeeks * 7);
-
-      if (dueDate > now) {
-        return null;
-      }
-
-      return {
-        address: customer.address,
-        customerId: customer.id,
-        customerName: customer.full_name,
-        dueAt: dueDate.toISOString(),
-        intervalWeeks,
-        lastServiceAt: customerLastServiceAt[customer.id] ?? null,
-        phone: customer.phone,
-        serviceType: customer.recurring_service_type
-      };
-    })
-    .filter((reminder): reminder is CustomerReminder => Boolean(reminder))
-    .sort((first, second) => new Date(first.dueAt).getTime() - new Date(second.dueAt).getTime());
+  const customerReminders = ((remindersResult.data ?? []) as CustomerRecurringReminder[]).map<CustomerReminder>((reminder) => ({
+    address: reminder.customers?.address ?? null,
+    customerId: reminder.customer_id,
+    customerName: reminder.customers?.full_name ?? "Customer",
+    dueAt: reminder.due_at,
+    id: reminder.id,
+    intervalWeeks: reminder.interval_weeks,
+    lastServiceAt: reminder.last_service_at,
+    phone: reminder.customers?.phone ?? null,
+    serviceType: reminder.service_type
+  }));
 
   const { start, end } = todayRange();
   const scheduledJobs = jobs.filter((job) => job.scheduled_start && job.status !== "canceled");
@@ -455,6 +457,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     user: profile,
     business: businessResult.data,
     radiusRule: radiusResult.data ?? null,
+    availabilityExceptions: (availabilityExceptionsResult.data ?? []) as BusinessAvailabilityException[],
     billing: billingResult.data ?? null,
     jobs,
     customers,

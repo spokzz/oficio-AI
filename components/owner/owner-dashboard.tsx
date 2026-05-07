@@ -6,15 +6,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
+  addOwnerAvailabilityException,
   addOwnerBooking,
   addOwnerCustomer,
+  deleteOwnerAvailabilityException,
   deleteOwnerBooking,
   deleteOwnerCustomer,
   updateOwnerBooking,
   updateOwnerCustomer,
+  updateOwnerServiceArea,
   updateOwnerSettings,
   type AddBookingState,
   type AddCustomerState,
+  type OwnerClosureState,
+  type OwnerServiceAreaState,
   type OwnerSettingsState
 } from "@/app/actions/owner";
 import {
@@ -30,6 +35,7 @@ import {
   TrashIcon,
   UsersIcon
 } from "@/components/ui/icons";
+import { AddressLookupInput } from "@/components/ui/address-lookup-input";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -40,7 +46,7 @@ import type { Customer, Job } from "@/lib/types";
 
 type Tab = "home" | "bookings" | "customers" | "quotes" | "messages" | "settings";
 type Lang = "es" | "en";
-type BookingView = "current" | "past";
+type BookingView = "current" | "past" | "leads";
 type CustomerSort = "asc" | "desc";
 
 const DAY_MS = 86_400_000;
@@ -119,6 +125,8 @@ const copy = {
     bookingValue: "Valor estimado",
     yardCleaningBooking: "Reserva de limpieza de patio",
     currentBookings: "Reservas actuales",
+    leadBookings: "Clientes potenciales",
+    leadBookingsSubtitle: "Solicitudes que necesitan seguimiento o una cita.",
     pastBooking: "Reservas pasadas",
     pastBookingSubtitle: "Lista de todas las citas pasadas.",
     bookingDetails: "Detalles de la reserva",
@@ -150,6 +158,28 @@ const copy = {
     phoneSetupSubtitle: "Cómo Ana recibe llamadas y mensajes para este negocio.",
     ownerSummarySettings: "Resúmenes para el dueño",
     ownerSummarySettingsSubtitle: "Elige cómo Ana agenda trabajos, explica horarios y envía resúmenes.",
+    availabilitySettings: "Días cerrados",
+    availabilitySettingsSubtitle: "Bloquea vacaciones, días festivos o cierres para que Ana no ofrezca citas.",
+    closureReason: "Motivo",
+    closureStartDate: "Primer día cerrado",
+    closureEndDate: "Último día cerrado",
+    closureMessage: "Mensaje para el cliente",
+    addClosure: "Agregar cierre",
+    closedDatesSaved: "Días cerrados guardados.",
+    upcomingClosures: "Próximos cierres",
+    noClosures: "No hay días cerrados programados.",
+    removeClosure: "Eliminar cierre",
+    confirmDeleteClosure: "¿Eliminar estos días cerrados?",
+    closureDeleted: "Días cerrados eliminados.",
+    serviceAreaSettings: "Área de servicio",
+    serviceAreaSettingsSubtitle: "Configura la dirección base y el radio que Ana usa antes de aceptar citas.",
+    companyAddress: "Dirección de la compañía",
+    serviceRadiusMiles: "Radio de servicio",
+    outsideRadiusPolicy: "Fuera del radio",
+    addressLookupEmpty: "Sin resultados",
+    declineOutsideRadius: "Ana rechaza automáticamente",
+    allowOutsideRadius: "Permitir con aprobación del dueño",
+    serviceAreaSaved: "Área de servicio guardada.",
     summaryLanguage: "Idioma de resumen",
     summaryMethod: "Método de resumen",
     summaryMethodSms: "Texto SMS",
@@ -252,6 +282,8 @@ const copy = {
     of: "de",
     clearSearch: "Limpiar",
     noMatchingBookings: "No hay reservas que coincidan con esa búsqueda.",
+    noMatchingLeads: "No hay clientes potenciales que coincidan con esa búsqueda.",
+    noLeads: "No hay clientes potenciales todavía.",
     noMatchingCustomers: "No hay clientes que coincidan con esa búsqueda.",
     saving: "Guardando...",
     updateCustomer: "Actualizar cliente",
@@ -344,6 +376,8 @@ const copy = {
     bookingValue: "Estimated value",
     yardCleaningBooking: "Yard cleaning booking",
     currentBookings: "Current bookings",
+    leadBookings: "Leads",
+    leadBookingsSubtitle: "Requests that need follow-up or a scheduled appointment.",
     pastBooking: "Past booking",
     pastBookingSubtitle: "List of all past appointments.",
     bookingDetails: "Booking details",
@@ -375,6 +409,28 @@ const copy = {
     phoneSetupSubtitle: "How Ana receives calls and texts for this business.",
     ownerSummarySettings: "Owner summaries",
     ownerSummarySettingsSubtitle: "Choose how Ana schedules jobs, explains hours, and sends owner summaries.",
+    availabilitySettings: "Closed dates",
+    availabilitySettingsSubtitle: "Block vacations, holidays, or closures so Ana does not offer appointments.",
+    closureReason: "Reason",
+    closureStartDate: "First closed day",
+    closureEndDate: "Last closed day",
+    closureMessage: "Customer message",
+    addClosure: "Add closure",
+    closedDatesSaved: "Closed dates saved.",
+    upcomingClosures: "Upcoming closures",
+    noClosures: "No closed dates scheduled.",
+    removeClosure: "Remove closure",
+    confirmDeleteClosure: "Remove these closed dates?",
+    closureDeleted: "Closed dates removed.",
+    serviceAreaSettings: "Service area",
+    serviceAreaSettingsSubtitle: "Set the base address and radius Ana checks before accepting appointments.",
+    companyAddress: "Company address",
+    serviceRadiusMiles: "Service radius",
+    outsideRadiusPolicy: "Outside radius",
+    addressLookupEmpty: "No matches",
+    declineOutsideRadius: "Ana declines automatically",
+    allowOutsideRadius: "Allow with owner approval",
+    serviceAreaSaved: "Service area saved.",
     summaryLanguage: "Summary language",
     summaryMethod: "Summary method",
     summaryMethodSms: "SMS text",
@@ -477,6 +533,8 @@ const copy = {
     of: "of",
     clearSearch: "Clear",
     noMatchingBookings: "No bookings match that search.",
+    noMatchingLeads: "No leads match that search.",
+    noLeads: "No leads yet.",
     noMatchingCustomers: "No customers match that search.",
     saving: "Saving...",
     updateCustomer: "Update customer",
@@ -689,6 +747,23 @@ function formatDate(value: string | null | undefined, fallback = "Not set") {
   }).format(date);
 }
 
+function formatDateOnly(value: string | null | undefined, fallback = "Not set") {
+  if (!value) return fallback;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return fallback;
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(new Date(year, month - 1, day));
+}
+
+function formatClosureRange(startsOn: string, endsOn: string) {
+  if (startsOn === endsOn) return formatDateOnly(startsOn);
+  return `${formatDateOnly(startsOn)} - ${formatDateOnly(endsOn)}`;
+}
+
 function formatDuration(seconds: number) {
   const safeSeconds = Math.max(0, Math.round(seconds));
   const hours = Math.floor(safeSeconds / 3600);
@@ -849,6 +924,11 @@ function scheduledTime(job: OwnerPortalData["jobs"][number]) {
   return Number.isNaN(time) ? 0 : time;
 }
 
+function createdTime(job: OwnerPortalData["jobs"][number]) {
+  const time = job.created_at ? new Date(job.created_at).getTime() : 0;
+  return Number.isNaN(time) ? 0 : time;
+}
+
 function toDateTimeLocalValue(value: string | null | undefined) {
   if (!value) return "";
 
@@ -890,9 +970,13 @@ export function OwnerDashboard({
     () => data.quotes.find((quote) => quote.status === "needs_owner_approval" || quote.status === "draft") ?? data.quotes[0],
     [data.quotes]
   );
-  const scheduledBookings = useMemo(() => data.jobs.filter((job) => job.scheduled_start && job.status !== "canceled"), [data.jobs]);
+  const scheduledBookings = useMemo(
+    () => data.jobs.filter((job) => job.scheduled_start && job.status !== "canceled" && job.status !== "lead" && job.status !== "pending"),
+    [data.jobs]
+  );
   const currentBookings = useMemo(() => scheduledBookings.filter((job) => !isPastBooking(job)).sort((a, b) => scheduledTime(a) - scheduledTime(b)), [scheduledBookings]);
   const pastBookings = useMemo(() => scheduledBookings.filter(isPastBooking).sort((a, b) => scheduledTime(b) - scheduledTime(a)), [scheduledBookings]);
+  const leadBookings = useMemo(() => data.jobs.filter((job) => job.status === "lead").sort((a, b) => createdTime(b) - createdTime(a)), [data.jobs]);
   const todayJobs = useMemo(() => scheduledBookings.filter(isTodayJob), [scheduledBookings]);
   const callActivity = useMemo(() => monthlyCallActivity(data.calls, language, selectedCallWeekStart), [data.calls, language, selectedCallWeekStart]);
   const maxCallCount = Math.max(...callActivity.map((day) => day.count), 1);
@@ -1090,6 +1174,7 @@ export function OwnerDashboard({
         <BookingsTab
           currentJobs={currentBookings}
           labels={t}
+          leadJobs={leadBookings}
           onAddBooking={() => setIsBookingModalOpen(true)}
           onDeleteBooking={handleBookingDeleted}
           onEditBooking={(booking) => setEditBooking(booking)}
@@ -1146,6 +1231,7 @@ export function OwnerDashboard({
         <CustomerDetailsModal
           customer={detailCustomer}
           labels={t}
+          leads={leadBookings.filter((job) => job.customer_id === detailCustomer.id)}
           onClose={() => setDetailCustomer(null)}
           onEdit={() => {
             setEditCustomer(detailCustomer);
@@ -1255,7 +1341,7 @@ function CustomerReminderList({ data, labels }: { data: OwnerPortalData; labels:
       {data.customerReminders.length ? (
         <div className="list">
           {data.customerReminders.slice(0, 4).map((reminder) => (
-            <article className="row-card reminder-row" key={reminder.customerId}>
+            <article className="row-card reminder-row" key={reminder.id}>
               <strong>{reminder.customerName}</strong>
               <div className="meta">
                 {serviceLabel(labels, reminder.serviceType)} {labels.every} {reminder.intervalWeeks}{" "}
@@ -1485,6 +1571,110 @@ function BusinessHoursDropdowns({ initialText, labels }: { initialText?: string 
   );
 }
 
+function AvailabilityExceptionsForm({
+  exceptions,
+  labels,
+  onSaved
+}: {
+  exceptions: OwnerPortalData["availabilityExceptions"];
+  labels: OwnerCopy;
+  onSaved: (message: string) => void;
+}) {
+  const router = useRouter();
+  const [state, formAction] = useActionState<OwnerClosureState, FormData>(addOwnerAvailabilityException, {});
+  const [isDeleting, startDeleteTransition] = useTransition();
+
+  useEffect(() => {
+    if (state.success) {
+      onSaved(state.success || labels.closedDatesSaved);
+      router.refresh();
+    }
+  }, [labels.closedDatesSaved, onSaved, router, state.success]);
+
+  const handleDelete = useCallback(
+    (exceptionId: string) => {
+      if (!window.confirm(labels.confirmDeleteClosure)) return;
+
+      startDeleteTransition(async () => {
+        const result = await deleteOwnerAvailabilityException(exceptionId);
+        if (result.error) {
+          onSaved(result.error);
+          return;
+        }
+
+        onSaved(result.success || labels.closureDeleted);
+        router.refresh();
+      });
+    },
+    [labels.closureDeleted, labels.confirmDeleteClosure, onSaved, router]
+  );
+
+  return (
+    <section className="card owner-settings-card availability-card">
+      <div className="section-card-header">
+        <div>
+          <h2>{labels.availabilitySettings}</h2>
+          <p className="meta">{labels.availabilitySettingsSubtitle}</p>
+        </div>
+      </div>
+      <form action={formAction} className="availability-closure-form">
+        <label className="field">
+          <span>{labels.closureReason}</span>
+          <input defaultValue="Vacation" maxLength={80} name="title" required />
+        </label>
+        <label className="field">
+          <span>{labels.closureStartDate}</span>
+          <input name="startsOn" required type="date" />
+        </label>
+        <label className="field">
+          <span>{labels.closureEndDate}</span>
+          <input name="endsOn" required type="date" />
+        </label>
+        <label className="field full">
+          <span>{labels.closureMessage}</span>
+          <input
+            maxLength={180}
+            name="message"
+            placeholder="We are unavailable that day and can schedule another date."
+          />
+        </label>
+        {state.error ? <p className="form-error full">{state.error}</p> : null}
+        {state.success ? <p className="form-success full">{state.success}</p> : null}
+        <div className="toolbar full">
+          <SettingsSaveButton label={labels.addClosure} savingLabel={labels.saving} />
+        </div>
+      </form>
+      <div className="availability-list">
+        <h3>{labels.upcomingClosures}</h3>
+        {exceptions.length ? (
+          <div className="closure-list">
+            {exceptions.map((exception) => (
+              <div className="closure-row" key={exception.id}>
+                <div>
+                  <strong>{exception.title}</strong>
+                  <span>{formatClosureRange(exception.starts_on, exception.ends_on)}</span>
+                  {exception.message ? <p>{exception.message}</p> : null}
+                </div>
+                <button
+                  className="icon-action-button danger"
+                  disabled={isDeleting}
+                  onClick={() => handleDelete(exception.id)}
+                  title={labels.removeClosure}
+                  type="button"
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="meta">{labels.noClosures}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function SummarySettingsForm({
   business,
   labels,
@@ -1555,9 +1745,73 @@ function SummarySettingsForm({
   );
 }
 
+function ServiceAreaSettingsForm({
+  data,
+  labels,
+  onSaved
+}: {
+  data: OwnerPortalData;
+  labels: OwnerCopy;
+  onSaved: (message: string) => void;
+}) {
+  const [state, formAction] = useActionState<OwnerServiceAreaState, FormData>(updateOwnerServiceArea, {});
+  const business = data.business;
+  const radiusRule = data.radiusRule;
+
+  useEffect(() => {
+    if (state.success) {
+      onSaved(state.success || labels.serviceAreaSaved);
+    }
+  }, [labels.serviceAreaSaved, onSaved, state.success]);
+
+  return (
+    <section className="card owner-settings-card service-area-card">
+      <div className="section-card-header">
+        <div>
+          <h2>{labels.serviceAreaSettings}</h2>
+          <p className="meta">{labels.serviceAreaSettingsSubtitle}</p>
+        </div>
+      </div>
+      <form action={formAction}>
+        <div className="service-area-fields">
+          <AddressLookupInput
+            className="full"
+            defaultValue={business.base_address}
+            emptyLabel={labels.addressLookupEmpty}
+            label={labels.companyAddress}
+            name="baseAddress"
+            placeholder="123 Main St, Austin, TX"
+            required
+          />
+          <div className="service-area-row">
+            <label className="field service-radius-field">
+              <span>{labels.serviceRadiusMiles}</span>
+              <input defaultValue={radiusRule?.radius_miles ?? 30} min="1" max="250" name="radiusMiles" required type="number" />
+            </label>
+            <label className="field">
+              <span>{labels.outsideRadiusPolicy}</span>
+              <select defaultValue={radiusRule?.allow_outside_radius ? "true" : "false"} name="allowOutsideRadius">
+                <option value="false">{labels.declineOutsideRadius}</option>
+                <option value="true">{labels.allowOutsideRadius}</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
+        {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
+        <div className="toolbar" style={{ marginTop: 16 }}>
+          <SettingsSaveButton label={labels.saveSettings} savingLabel={labels.saving} />
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function SettingsTab({ data, labels, onSaved }: { data: OwnerPortalData; labels: OwnerCopy; onSaved: (message: string) => void }) {
   return (
     <div className="grid">
+      <AvailabilityExceptionsForm exceptions={data.availabilityExceptions} labels={labels} onSaved={onSaved} />
+      <ServiceAreaSettingsForm data={data} labels={labels} onSaved={onSaved} />
       <SummarySettingsForm business={data.business} labels={labels} onSaved={onSaved} />
       <PhoneSetupCard data={data} labels={labels} />
     </div>
@@ -1609,6 +1863,7 @@ function DirectorySearch({
 function BookingsTab({
   currentJobs,
   labels,
+  leadJobs,
   onAddBooking,
   onDeleteBooking,
   onEditBooking,
@@ -1617,6 +1872,7 @@ function BookingsTab({
 }: {
   currentJobs: OwnerPortalData["jobs"];
   labels: OwnerCopy;
+  leadJobs: OwnerPortalData["jobs"];
   onAddBooking: () => void;
   onDeleteBooking: (booking: Job) => void;
   onEditBooking: (booking: Job) => void;
@@ -1625,13 +1881,15 @@ function BookingsTab({
 }) {
   const [bookingView, setBookingView] = useState<BookingView>("current");
   const [searchQuery, setSearchQuery] = useState("");
-  const visibleJobs = bookingView === "current" ? currentJobs : pastJobs;
+  const visibleJobs = bookingView === "current" ? currentJobs : bookingView === "leads" ? leadJobs : pastJobs;
   const filteredJobs = useMemo(
     () => visibleJobs.filter((job) => matchesSearch(searchQuery, job.customers?.full_name, job.address, job.customers?.address)),
     [searchQuery, visibleJobs]
   );
-  const activeBookingLabel = bookingView === "current" ? labels.currentBookings : labels.pastBooking;
-  const subtitle = bookingView === "current" ? labels.addBookingSubtitle : labels.pastBookingSubtitle;
+  const activeBookingLabel = bookingView === "current" ? labels.currentBookings : bookingView === "leads" ? labels.leadBookings : labels.pastBooking;
+  const subtitle = bookingView === "current" ? labels.addBookingSubtitle : bookingView === "leads" ? labels.leadBookingsSubtitle : labels.pastBookingSubtitle;
+  const emptyLabel = bookingView === "leads" ? labels.noLeads : labels.noJobs;
+  const noMatchingLabel = bookingView === "leads" ? labels.noMatchingLeads : labels.noMatchingBookings;
 
   return (
     <section className="customer-directory">
@@ -1642,6 +1900,9 @@ function BookingsTab({
           <div className="booking-view-toggle" aria-label={labels.bookings}>
             <button className={bookingView === "current" ? "active" : ""} onClick={() => setBookingView("current")} type="button">
               {labels.currentBookings}
+            </button>
+            <button className={bookingView === "leads" ? "active" : ""} onClick={() => setBookingView("leads")} type="button">
+              {labels.leadBookings}
             </button>
             <button className={bookingView === "past" ? "active" : ""} onClick={() => setBookingView("past")} type="button">
               {labels.pastBooking}
@@ -1672,15 +1933,15 @@ function BookingsTab({
         value={searchQuery}
       />
       <div className="customer-table-wrap">
-        <table className="customer-table">
+        <table className="customer-table owner-directory-table">
           <thead>
             <tr>
               <th>{labels.job}</th>
               <th>{labels.customer}</th>
-              <th>{labels.schedule}</th>
+              <th>{bookingView === "leads" ? labels.status : labels.schedule}</th>
               <th>{labels.address}</th>
               <th>{labels.value}</th>
-              <th aria-label={labels.actions} className="action-column" />
+              <th className="action-column">{labels.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -1691,7 +1952,7 @@ function BookingsTab({
                     <span className="customer-name">{bookingTitleLabel(labels, job)}</span>
                   </td>
                   <td>{customerName(job.customers, labels.newCustomer)}</td>
-                  <td>{formatDateTime(job.scheduled_start)}</td>
+                  <td>{bookingView === "leads" ? statusLabel(labels, job.status) : formatDateTime(job.scheduled_start)}</td>
                   <td>{job.address ?? labels.noAddress}</td>
                   <td>{formatCurrency(job.final_value ?? job.estimated_value)}</td>
                   <td>
@@ -1715,12 +1976,53 @@ function BookingsTab({
             ) : (
               <tr>
                 <td colSpan={6}>
-                  <div className="empty-state">{visibleJobs.length ? labels.noMatchingBookings : labels.noJobs}</div>
+                  <div className="empty-state">{visibleJobs.length ? noMatchingLabel : emptyLabel}</div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mobile-directory-list">
+        {filteredJobs.length ? (
+          filteredJobs.map((job) => (
+            <article className="mobile-directory-card" key={job.id}>
+              <div className="mobile-directory-card-header">
+                <div>
+                  <strong>{bookingTitleLabel(labels, job)}</strong>
+                  <span>{customerName(job.customers, labels.newCustomer)}</span>
+                </div>
+                <span className="mobile-directory-value">{formatCurrency(job.final_value ?? job.estimated_value)}</span>
+              </div>
+              <dl className="mobile-directory-details">
+                <div>
+                  <dt>{bookingView === "leads" ? labels.status : labels.schedule}</dt>
+                  <dd>{bookingView === "leads" ? statusLabel(labels, job.status) : formatDateTime(job.scheduled_start)}</dd>
+                </div>
+                <div>
+                  <dt>{labels.address}</dt>
+                  <dd>{job.address ?? labels.noAddress}</dd>
+                </div>
+              </dl>
+              <div className="mobile-row-actions">
+                <button className="icon-action-button" onClick={() => onOpenBooking(job)} type="button">
+                  <EyeIcon />
+                  <span>{labels.viewBooking}</span>
+                </button>
+                <button className="icon-action-button edit" onClick={() => onEditBooking(job)} type="button">
+                  <PencilIcon />
+                  <span>{labels.editBooking}</span>
+                </button>
+                <button className="icon-action-button danger" onClick={() => onDeleteBooking(job)} type="button">
+                  <TrashIcon />
+                  <span>{labels.deleteBooking}</span>
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <div className="empty-state">{visibleJobs.length ? noMatchingLabel : emptyLabel}</div>
+        )}
       </div>
     </section>
   );
@@ -1787,7 +2089,7 @@ function CustomersTab({
         value={searchQuery}
       />
       <div className="customer-table-wrap">
-        <table className="customer-table">
+        <table className="customer-table owner-directory-table customer-list-table">
           <thead>
             <tr>
               <th>
@@ -1801,13 +2103,10 @@ function CustomersTab({
                 </button>
               </th>
               <th>{labels.phone}</th>
-              <th>{labels.joinedOn}</th>
               <th>{labels.service}</th>
-              <th>{labels.recurringService}</th>
               <th>{labels.serviceFee}</th>
-              <th>{labels.language}</th>
               <th>{labels.address}</th>
-              <th aria-label={labels.actions} className="action-column" />
+              <th className="action-column">{labels.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -1818,12 +2117,11 @@ function CustomersTab({
                     <span className="customer-name">{customer.full_name}</span>
                   </td>
                   <td>{formatPhone(customer.phone) ?? labels.missing}</td>
-                  <td>{formatDate(customer.created_at, labels.notSet)}</td>
                   <td>{serviceLabel(labels, customerServices[customer.id])}</td>
-                  <td>{recurringServiceLabel(labels, customer)}</td>
                   <td>{serviceFeeLabel(customer.service_fee)}</td>
-                  <td>{languageLabel(labels, customer.preferred_language)}</td>
-                  <td>{customer.address ?? labels.noAddress}</td>
+                  <td>
+                    <span className="customer-address-cell">{customer.address ?? labels.noAddress}</span>
+                  </td>
                   <td>
                     <div className="row-actions">
                       <button className="icon-action-button" onClick={() => onOpenCustomer(customer)} type="button">
@@ -1844,13 +2142,54 @@ function CustomersTab({
               ))
             ) : (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={6}>
                   <div className="empty-state">{customers.length ? labels.noMatchingCustomers : labels.noCustomers}</div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mobile-directory-list">
+        {sortedCustomers.length ? (
+          sortedCustomers.map((customer) => (
+            <article className="mobile-directory-card" key={customer.id}>
+              <div className="mobile-directory-card-header">
+                <div>
+                  <strong>{customer.full_name}</strong>
+                  <span>{formatPhone(customer.phone) ?? labels.missing}</span>
+                </div>
+                <span className="mobile-directory-value">{serviceFeeLabel(customer.service_fee)}</span>
+              </div>
+              <dl className="mobile-directory-details">
+                <div>
+                  <dt>{labels.service}</dt>
+                  <dd>{serviceLabel(labels, customerServices[customer.id])}</dd>
+                </div>
+                <div>
+                  <dt>{labels.address}</dt>
+                  <dd>{customer.address ?? labels.noAddress}</dd>
+                </div>
+              </dl>
+              <div className="mobile-row-actions">
+                <button className="icon-action-button" onClick={() => onOpenCustomer(customer)} type="button">
+                  <EyeIcon />
+                  <span>{labels.viewCustomer}</span>
+                </button>
+                <button className="icon-action-button edit" onClick={() => onEditCustomer(customer)} type="button">
+                  <PencilIcon />
+                  <span>{labels.editCustomer}</span>
+                </button>
+                <button className="icon-action-button danger" onClick={() => onDeleteCustomer(customer)} type="button">
+                  <TrashIcon />
+                  <span>{labels.deleteCustomer}</span>
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <div className="empty-state">{customers.length ? labels.noMatchingCustomers : labels.noCustomers}</div>
+        )}
       </div>
     </section>
   );
@@ -1972,16 +2311,19 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
 function CustomerDetailsModal({
   customer,
   labels,
+  leads,
   onClose,
   onEdit,
   service
 }: {
   customer: Customer;
   labels: OwnerCopy;
+  leads: Job[];
   onClose: () => void;
   onEdit: () => void;
   service?: string;
 }) {
+  const latestLead = leads[0] ?? null;
   const details = [
     { label: labels.fullName, value: customer.full_name },
     { label: labels.phone, value: formatPhone(customer.phone) ?? labels.missing },
@@ -1992,6 +2334,9 @@ function CustomerDetailsModal({
     { label: labels.serviceFee, value: serviceFeeLabel(customer.service_fee) },
     { label: labels.preferredLanguage, value: languageLabel(labels, customer.preferred_language) },
     { label: labels.source, value: sourceLabel(labels, customer.referral_source) },
+    ...(latestLead
+      ? [{ highlight: true, label: labels.status, value: statusLabel(labels, latestLead.status) }]
+      : []),
     { label: labels.address, value: customer.address ?? labels.noAddress },
     { label: labels.notes, value: customer.notes ?? labels.noNotes, full: true }
   ];
@@ -2021,7 +2366,7 @@ function CustomerDetailsModal({
         </div>
         <dl className="detail-grid">
           {details.map((item) => (
-            <div className={item.full ? "full" : ""} key={item.label}>
+            <div className={`${item.full ? "full" : ""} ${item.highlight ? "highlight" : ""}`.trim()} key={item.label}>
               <dt>{item.label}</dt>
               <dd>{item.value}</dd>
             </div>
@@ -2124,10 +2469,7 @@ function AddCustomerModal({
               <option value="en">{labels.english}</option>
             </select>
           </label>
-          <label className="field">
-            <span>{labels.address}</span>
-            <input name="address" />
-          </label>
+          <AddressLookupInput emptyLabel={labels.addressLookupEmpty} label={labels.address} name="address" />
           <label className="field full">
             <span>{labels.notes}</span>
             <textarea name="notes" />
@@ -2242,10 +2584,7 @@ function AddBookingModal({
               <input className="service-fee-input" inputMode="decimal" min="0" name="estimatedValue" step="0.01" type="number" />
             </div>
           </label>
-          <label className="field full">
-            <span>{labels.bookingAddress}</span>
-            <input name="address" />
-          </label>
+          <AddressLookupInput className="full" emptyLabel={labels.addressLookupEmpty} label={labels.bookingAddress} name="address" />
           <label className="field full">
             <span>{labels.notes}</span>
             <textarea name="notes" />
@@ -2277,6 +2616,7 @@ function BookingDetailsModal({
   const details = [
     { label: labels.job, value: bookingTitleLabel(labels, booking) },
     { label: labels.customer, value: customerName(booking.customers, labels.newCustomer) },
+    { label: labels.status, value: statusLabel(labels, booking.status) },
     { label: labels.service, value: serviceLabel(labels, booking.service_type) },
     { label: labels.schedule, value: formatDateTime(booking.scheduled_start) },
     { label: labels.address, value: booking.address ?? labels.noAddress },
@@ -2337,6 +2677,8 @@ function EditBookingModal({
   const [state, formAction] = useActionState(updateOwnerBooking, initialState);
   const selectedCustomer = customers.some((customer) => customer.id === booking.customer_id) ? (booking.customer_id ?? "") : "";
   const selectedService = serviceOptions.includes(booking.service_type as ServiceOption) ? (booking.service_type as ServiceOption) : "landscaping";
+  const initialBookingStatus = booking.status === "lead" ? "lead" : "confirmed";
+  const [bookingStatus, setBookingStatus] = useState(initialBookingStatus);
 
   useEffect(() => {
     if (state.success) {
@@ -2365,6 +2707,13 @@ function EditBookingModal({
         <form action={formAction} className="form-grid">
           <input name="bookingId" type="hidden" value={booking.id} />
           <label className="field">
+            <span>{labels.status}</span>
+            <select name="bookingStatus" onChange={(event) => setBookingStatus(event.target.value as "lead" | "confirmed")} value={bookingStatus}>
+              <option value="lead">{statusLabel(labels, "lead")}</option>
+              <option value="confirmed">{labels.customer}</option>
+            </select>
+          </label>
+          <label className="field">
             <span>{labels.chooseCustomer}</span>
             <select defaultValue={selectedCustomer} name="customerId" required>
               <option disabled value="">
@@ -2389,7 +2738,7 @@ function EditBookingModal({
           </label>
           <label className="field">
             <span>{labels.bookingDate}</span>
-            <input defaultValue={toDateTimeLocalValue(booking.scheduled_start)} name="scheduledStart" required type="datetime-local" />
+            <input defaultValue={toDateTimeLocalValue(booking.scheduled_start)} name="scheduledStart" required={bookingStatus === "confirmed"} type="datetime-local" />
           </label>
           <label className="field">
             <span>{labels.bookingValue}</span>
@@ -2406,10 +2755,13 @@ function EditBookingModal({
               />
             </div>
           </label>
-          <label className="field full">
-            <span>{labels.bookingAddress}</span>
-            <input defaultValue={booking.address ?? ""} name="address" />
-          </label>
+          <AddressLookupInput
+            className="full"
+            defaultValue={booking.address}
+            emptyLabel={labels.addressLookupEmpty}
+            label={labels.bookingAddress}
+            name="address"
+          />
           <label className="field full">
             <span>{labels.notes}</span>
             <textarea defaultValue={booking.owner_notes ?? ""} name="notes" />
@@ -2545,10 +2897,7 @@ function EditCustomerModal({
               <option value="en">{labels.english}</option>
             </select>
           </label>
-          <label className="field">
-            <span>{labels.address}</span>
-            <input defaultValue={customer.address ?? ""} name="address" />
-          </label>
+          <AddressLookupInput defaultValue={customer.address} emptyLabel={labels.addressLookupEmpty} label={labels.address} name="address" />
           <label className="field full">
             <span>{labels.notes}</span>
             <textarea defaultValue={customer.notes ?? ""} name="notes" />

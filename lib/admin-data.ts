@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Business, ManualBillingAccount, UserProfile } from "@/lib/types";
+import type { Business, BusinessAvailabilityException, ManualBillingAccount, ServiceRadiusRule, UserProfile } from "@/lib/types";
 
 export type AdminAccount = Business & {
+  business_availability_exceptions?: BusinessAvailabilityException[] | null;
   manual_billing_accounts?: ManualBillingAccount[] | null;
+  service_radius_rules?: ServiceRadiusRule[] | null;
   owners: UserProfile[];
 };
 
@@ -36,10 +38,16 @@ export async function getAdminPortalData(): Promise<AdminPortalData> {
 
   const { data: accounts } = await supabase
     .from("businesses")
-    .select("*, manual_billing_accounts(*)")
+    .select("*, business_availability_exceptions(*), manual_billing_accounts(*), service_radius_rules(*)")
     .order("created_at", { ascending: false });
 
-  const baseAccounts = (accounts ?? []) as Array<Business & { manual_billing_accounts?: ManualBillingAccount[] | null }>;
+  const baseAccounts = (accounts ?? []) as Array<
+    Business & {
+      business_availability_exceptions?: BusinessAvailabilityException[] | null;
+      manual_billing_accounts?: ManualBillingAccount[] | null;
+      service_radius_rules?: ServiceRadiusRule[] | null;
+    }
+  >;
   const businessIds = baseAccounts.map((account) => account.id);
   const ownersByBusiness = new Map<string, UserProfile[]>();
 

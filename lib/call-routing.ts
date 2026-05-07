@@ -305,7 +305,8 @@ export function ownerFirstName(owner: RoutingOwner | null) {
 }
 
 export function businessScreeningPrompt(context: RoutingContext) {
-  return `Hi, thanks for calling ${context.business.name}. This is Ana. How can I help today?`;
+  const agentName = context.business.ai_voice_name?.replace(/\s+/g, " ").trim() || "Ana";
+  return `Hi, thanks for calling ${context.business.name}. This is ${agentName}. How can I help today?`;
 }
 
 export function transferToOwnerTwiml(context: RoutingContext) {

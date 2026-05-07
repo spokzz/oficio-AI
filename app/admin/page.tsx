@@ -32,11 +32,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     <PortalShell
       badge="Admin console"
       eyebrow="Internal operations"
+      headerPlacement={activeTab === "overview" ? "topbar" : "none"}
       nav={adminTabs.map((item) => ({
         label: item.label,
         href: item.href,
         active: item.tab === activeTab
       }))}
+      showSearch={false}
       subtitle="Set up owners, monitor accounts, tune AI behavior, and track manual billing."
       title={`Welcome, ${data.user.full_name?.split(" ")[0] ?? "Admin"}`}
     >

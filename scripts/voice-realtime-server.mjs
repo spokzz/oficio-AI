@@ -50,10 +50,10 @@ const OPENAI_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-mini";
 const OPENAI_VOICE = process.env.OPENAI_REALTIME_VOICE || "marin";
 const PORT = Number(process.env.OFICIO_VOICE_GATEWAY_PORT || 8787);
 const NEXT_APP_ORIGIN = process.env.OFICIO_NEXT_APP_ORIGIN || "http://localhost:3000";
+const GEOCODIO_ENDPOINT = "https://api.geocod.io/v1.9/geocode";
 const BUSINESS_HOURS_TEXT =
   process.env.OFICIO_BUSINESS_HOURS_TEXT ||
   `Monday through Friday, ${String(WORKDAY_START_HOUR)}:00 AM to ${WORKDAY_END_HOUR > 12 ? WORKDAY_END_HOUR - 12 : WORKDAY_END_HOUR}:00 PM`;
-const SUMMARY_MODEL = process.env.OPENAI_SUMMARY_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.4-mini";
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -104,6 +104,28 @@ function normalizeCustomerSource(value) {
     return "referral";
   }
   return isCustomerSourceOption(text) ? text : "other";
+}
+
+function numericCoordinate(value) {
+  const coordinate = Number(value);
+  return Number.isFinite(coordinate) ? coordinate : null;
+}
+
+function geocodioApiKey() {
+  return process.env.GEOCODIO_API_KEY?.trim().replace(/;+$/, "");
+}
+
+function distanceMiles(origin, destination) {
+  const earthRadiusMiles = 3958.7613;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const latDelta = toRadians(destination.lat - origin.lat);
+  const lngDelta = toRadians(destination.lng - origin.lng);
+  const originLat = toRadians(origin.lat);
+  const destinationLat = toRadians(destination.lat);
+  const haversine =
+    Math.sin(latDelta / 2) ** 2 + Math.cos(originLat) * Math.cos(destinationLat) * Math.sin(lngDelta / 2) ** 2;
+
+  return 2 * earthRadiusMiles * Math.asin(Math.min(1, Math.sqrt(haversine)));
 }
 
 function businessServiceOptions(business) {
@@ -248,6 +270,10 @@ function serviceLabel(serviceType) {
   if (serviceType === "tree_cutting") return "Tree services";
   if (serviceType === "mowing") return "Lawn mowing";
   return serviceType.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function agentName(business) {
+  return String(business?.ai_voice_name || "Ana").replace(/\s+/g, " ").trim() || "Ana";
 }
 
 function bookingTitle(serviceType) {
@@ -462,7 +488,7 @@ async function getBusinessContext(businessId) {
   const { data: business, error } = await supabase
     .from("businesses")
     .select(
-      "id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,owner_summary_channel,available_services,booking_time_zone,business_hours_text,ai_voice_name,ai_disclosure,base_address"
+      "id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,owner_summary_channel,available_services,booking_time_zone,business_hours_text,ai_voice_name,ai_disclosure,base_address,base_lat,base_lng"
     )
     .eq("id", businessId)
     .maybeSingle();
@@ -489,11 +515,19 @@ async function getBusinessContext(businessId) {
     owner = ownerProfile || null;
   }
 
+  const { data: radiusRule } = await supabase
+    .from("service_radius_rules")
+    .select("radius_miles,allow_outside_radius,require_owner_approval_outside_radius")
+    .eq("business_id", businessId)
+    .limit(1)
+    .maybeSingle();
+
   return {
     business,
     owner,
     ownerEmail: owner?.email || null,
     ownerPhone: normalizePhone(business.owner_transfer_phone) || normalizePhone(owner?.phone),
+    radiusRule: radiusRule || null,
     supabase
   };
 }
@@ -502,17 +536,6 @@ function compactCallText(value, maxLength = 700) {
   const compact = String(value ?? "").replace(/\s+/g, " ").trim();
   if (compact.length <= maxLength) return compact;
   return `${compact.slice(0, maxLength - 3)}...`;
-}
-
-function responseOutputText(payload) {
-  if (typeof payload?.output_text === "string") return payload.output_text.trim();
-
-  return (payload?.output || [])
-    .flatMap((item) => item.content || [])
-    .filter((part) => part.type === "output_text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("")
-    .trim();
 }
 
 function fallbackTranscriptSummary(transcript, callerPhone, language = "en", fallbackOutcome) {
@@ -549,109 +572,16 @@ function fallbackTranscriptSummary(transcript, callerPhone, language = "en", fal
 }
 
 async function rewriteOwnerText({ kind = "summary", language, text }) {
-  const normalizedLanguage = ownerSummaryLanguage(language);
   const compactText = compactCallText(text, 700);
-  if (!compactText || !process.env.OPENAI_API_KEY) return compactText;
-
-  const targetLanguage = normalizedLanguage === "es" ? "Spanish" : "English";
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    body: JSON.stringify({
-      input: [
-        {
-          content: [
-            {
-              type: "input_text",
-              text: [
-                `Rewrite this ${kind} for a home-service business owner in plain ${targetLanguage}.`,
-                `The entire output must be in ${targetLanguage}.`,
-                "Preserve names, phone numbers, dates, times, prices, services, and addresses exactly.",
-                "Do not add facts.",
-                "Keep it concise.",
-                compactText
-              ].join("\n")
-            }
-          ],
-          role: "user"
-        }
-      ],
-      max_output_tokens: 180,
-      model: SUMMARY_MODEL,
-      store: false
-    }),
-    headers: {
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    console.error("Could not rewrite owner text:", payload.error?.message || payload.message || response.status);
-    return compactText;
-  }
-
-  const payload = await response.json().catch(() => ({}));
-  return compactCallText(responseOutputText(payload) || compactText, 700);
+  void kind;
+  void language;
+  return compactText;
 }
 
 async function summarizeTranscript({ callerPhone, fallbackOutcome, language, transcript }) {
   const normalizedLanguage = ownerSummaryLanguage(language);
-  const targetLanguage = normalizedLanguage === "es" ? "Spanish" : "English";
   const safeTranscript = String(transcript ?? "").trim();
-  const fallback = fallbackTranscriptSummary(safeTranscript, callerPhone, normalizedLanguage, fallbackOutcome);
-
-  if (!safeTranscript || !process.env.OPENAI_API_KEY) {
-    return fallback;
-  }
-
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    body: JSON.stringify({
-      input: [
-        {
-          content: [
-            {
-              type: "input_text",
-              text: [
-                `Summarize this phone call transcript for a business owner in plain ${targetLanguage}.`,
-                `The entire summary must be in ${targetLanguage}.`,
-                "Do not show the transcript or quote long dialogue.",
-                "Keep it to 2 concise sentences.",
-                "Mention the caller name and phone number if available.",
-                "State what was discussed and what the caller wanted.",
-                "If the caller hung up, ended early, or shared too little detail, say that clearly.",
-                fallbackOutcome ? `Existing call outcome: ${fallbackOutcome}` : "",
-                callerPhone ? `Caller phone: ${callerPhone}` : "",
-                "Transcript:",
-                safeTranscript
-              ]
-                .filter(Boolean)
-                .join("\n")
-            }
-          ],
-          role: "user"
-        }
-      ],
-      max_output_tokens: 180,
-      model: SUMMARY_MODEL,
-      store: false
-    }),
-    headers: {
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    console.error("Could not summarize call transcript:", payload.error?.message || payload.message || response.status);
-    return fallback;
-  }
-
-  const payload = await response.json().catch(() => ({}));
-  const summary = compactCallText(responseOutputText(payload) || fallback, 700);
-  return rewriteOwnerText({ kind: "summary", language: normalizedLanguage, text: summary });
+  return fallbackTranscriptSummary(safeTranscript, callerPhone, normalizedLanguage, fallbackOutcome);
 }
 
 async function ensureCallArtifacts({ businessId, callSessionId, fallbackOutcome, transcript }) {
@@ -745,6 +675,46 @@ async function ensureCallArtifacts({ businessId, callSessionId, fallbackOutcome,
   }
 }
 
+async function geocodeAddress(address) {
+  const query = normalizeAddressForStorage(address);
+  if (!query) return { error: "No address was provided.", ok: false };
+  const apiKey = geocodioApiKey();
+  if (!apiKey) return { error: "GEOCODIO_API_KEY is not configured.", ok: false, skipped: "missing_api_key" };
+
+  const url = new URL(GEOCODIO_ENDPOINT);
+  url.searchParams.set("q", query);
+  url.searchParams.set("country", "USA");
+  url.searchParams.set("api_key", apiKey);
+
+  const response = await fetch(url);
+  if (!response.ok) return { error: `Geocodio returned ${response.status}.`, ok: false };
+
+  const payload = await response.json();
+  const first = payload?.results?.[0];
+  const lat = numericCoordinate(first?.location?.lat);
+  const lng = numericCoordinate(first?.location?.lng);
+  const accuracy = numericCoordinate(first?.accuracy);
+
+  if (!first || lat === null || lng === null) {
+    return { error: "Could not find coordinates for that address.", ok: false };
+  }
+
+  if (accuracy !== null && accuracy < 0.6) {
+    return { error: "The address match is too uncertain. Ask for a more complete service address.", ok: false };
+  }
+
+  return {
+    address: {
+      accuracy,
+      formattedAddress: first.formatted_address || query,
+      lat,
+      lng,
+      provider: "geocodio"
+    },
+    ok: true
+  };
+}
+
 async function existingBookings(supabase, businessId, start, end) {
   const { data, error } = await supabase
     .from("jobs")
@@ -757,6 +727,23 @@ async function existingBookings(supabase, businessId, start, end) {
 
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+async function availabilityExceptions(supabase, businessId, startDate, endDate) {
+  const { data, error } = await supabase
+    .from("business_availability_exceptions")
+    .select("id,title,starts_on,ends_on,message")
+    .eq("business_id", businessId)
+    .lte("starts_on", endDate)
+    .gte("ends_on", startDate)
+    .order("starts_on", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+function closureForDate(closures, dateKey) {
+  return closures.find((closure) => closure.starts_on <= dateKey && closure.ends_on >= dateKey) || null;
 }
 
 async function availableSlots({ businessId, date, durationMinutes = DEFAULT_SLOT_MINUTES, days = 7 }) {
@@ -776,12 +763,31 @@ async function availableSlots({ businessId, date, durationMinutes = DEFAULT_SLOT
     }
   }
 
+  if (!dateKeys.length) {
+    return { closedDates: [], slots: [], timeZone };
+  }
+
   const rangeStart = localDateTimeToUtc(dateKeys[0], "00:00", timeZone);
   const rangeEnd = addMinutes(localDateTimeToUtc(dateKeys.at(-1), "23:59", timeZone), 1);
+  const closures = await availabilityExceptions(supabase, businessId, dateKeys[0], dateKeys.at(-1));
+  const closedDates = dateKeys
+    .map((dateKey) => {
+      const closure = closureForDate(closures, dateKey);
+      return closure
+        ? {
+            date: dateKey,
+            message: closure.message || "Sorry, we don't have any appointments for that whole day.",
+            title: closure.title || "Closed"
+          }
+        : null;
+    })
+    .filter(Boolean);
   const bookings = await existingBookings(supabase, businessId, rangeStart, rangeEnd);
   const slots = [];
 
   for (const dateKey of dateKeys) {
+    if (closureForDate(closures, dateKey)) continue;
+
     const dayStart = localDateTimeToUtc(dateKey, "12:00", timeZone);
     if (!businessIsOpenOn(dayStart, timeZone, schedule)) continue;
 
@@ -811,10 +817,10 @@ async function availableSlots({ businessId, date, durationMinutes = DEFAULT_SLOT
     }
   }
 
-  return slots.slice(0, 8);
+  return { closedDates, slots: slots.slice(0, 8), timeZone };
 }
 
-async function findOrCreateCustomer({ address, businessId, email, name, phone, referralSource, supabase }) {
+async function findOrCreateCustomer({ address, businessId, email, geocodedAddress, name, phone, referralSource, supabase }) {
   const normalizedPhone = normalizePhone(phone);
   const normalizedAddress = normalizeAddressForStorage(address);
   const source = normalizeCustomerSource(referralSource);
@@ -823,7 +829,7 @@ async function findOrCreateCustomer({ address, businessId, email, name, phone, r
   if (normalizedPhone) {
     const { data: existing } = await supabase
       .from("customers")
-      .select("id,full_name,address,email,referral_source")
+      .select("id,full_name,address,email,lat,lng,referral_source,recurring_service_type,service_fee")
       .eq("business_id", businessId)
       .eq("phone", normalizedPhone)
       .limit(1)
@@ -832,6 +838,13 @@ async function findOrCreateCustomer({ address, businessId, email, name, phone, r
     if (existing?.id) {
       const updates = {};
       if (normalizedAddress && normalizedAddress !== existing.address) updates.address = normalizedAddress;
+      if (geocodedAddress) {
+        updates.geocode_accuracy = geocodedAddress.accuracy;
+        updates.geocode_provider = geocodedAddress.provider;
+        updates.geocoded_at = new Date().toISOString();
+        updates.lat = geocodedAddress.lat;
+        updates.lng = geocodedAddress.lng;
+      }
       if (email && !existing.email) updates.email = email;
       if (source !== "other" && (!existing.referral_source || existing.referral_source === "other")) {
         updates.referral_source = source;
@@ -845,7 +858,7 @@ async function findOrCreateCustomer({ address, businessId, email, name, phone, r
           .from("customers")
           .update(updates)
           .eq("id", existing.id)
-          .select("id,full_name,address")
+          .select("id,full_name,address,lat,lng,recurring_service_type,service_fee")
           .single();
 
         if (updateError) throw new Error(updateError.message);
@@ -863,16 +876,154 @@ async function findOrCreateCustomer({ address, businessId, email, name, phone, r
       business_id: businessId,
       email: email || null,
       full_name: fullName || (normalizedPhone ? `Caller ${normalizedPhone}` : "Phone caller"),
+      geocode_accuracy: geocodedAddress?.accuracy ?? null,
+      geocode_provider: geocodedAddress?.provider ?? null,
+      geocoded_at: geocodedAddress ? new Date().toISOString() : null,
+      lat: geocodedAddress?.lat ?? null,
+      lng: geocodedAddress?.lng ?? null,
       notes: "Created by Ana during a realtime voice call.",
       phone: normalizedPhone,
       preferred_language: "auto",
       referral_source: source
     })
-    .select("id,full_name,address")
+    .select("id,full_name,address,lat,lng,recurring_service_type,service_fee")
     .single();
 
   if (error) throw new Error(error.message);
   return data;
+}
+
+function appointmentEstimatedValue(args, customer) {
+  const requestedValue = Number(args.estimated_value);
+  if (Number.isFinite(requestedValue)) return requestedValue;
+
+  const customerFee = Number(customer?.service_fee);
+  if (Number.isFinite(customerFee) && (!customer.recurring_service_type || customer.recurring_service_type === args.service_type)) {
+    return customerFee;
+  }
+
+  return 0;
+}
+
+async function evaluateServiceArea({ address, business, radiusRule }) {
+  const baseLat = numericCoordinate(business?.base_lat);
+  const baseLng = numericCoordinate(business?.base_lng);
+  const radiusMiles = Number(radiusRule?.radius_miles);
+
+  if (!address || baseLat === null || baseLng === null || !Number.isFinite(radiusMiles) || radiusMiles <= 0) {
+    return { checked: false, ok: true, reason: "service_area_not_configured" };
+  }
+
+  const geocoded = await geocodeAddress(address);
+  if (!geocoded.ok) {
+    if (geocoded.skipped === "missing_api_key") {
+      return { checked: false, ok: true, reason: "geocoding_not_configured" };
+    }
+
+    return { checked: true, error: geocoded.error, ok: false, reason: "geocoding_failed" };
+  }
+
+  const distance = distanceMiles({ lat: baseLat, lng: baseLng }, { lat: geocoded.address.lat, lng: geocoded.address.lng });
+  const outsideRadius = distance > radiusMiles;
+  const allowOutsideRadius = Boolean(radiusRule?.allow_outside_radius);
+
+  return {
+    allowOutsideRadius,
+    checked: true,
+    distanceMiles: distance,
+    geocodedAddress: geocoded.address,
+    ok: !outsideRadius || allowOutsideRadius,
+    outsideRadius,
+    radiusMiles,
+    reason: outsideRadius ? "outside_radius" : "inside_radius"
+  };
+}
+
+function customerBookingConfirmationText({ address, agent, businessName, customerName, serviceType, start, timeZone }) {
+  const greetingName = String(customerName || "").trim().split(/\s+/)[0];
+  const greeting = greetingName ? `Hi ${greetingName}` : "Hi";
+  const location = address ? ` at ${address}` : "";
+  return `${greeting}, this is ${agent} with ${businessName}. Your ${serviceLabel(serviceType)} appointment is confirmed for ${spokenDateTime(start, timeZone)}${location}. Reply here if you need to update it.`;
+}
+
+function ownerBookingApprovalText({ address, agent, businessName, customerName, customerPhone, estimatedValue, serviceType, start, timeZone }) {
+  const location = address ? `\nAddress: ${address}` : "";
+  const value = Number.isFinite(Number(estimatedValue)) ? Number(estimatedValue) : 0;
+  return [
+    `${agent} booking request for ${businessName}:`,
+    `${customerName || "Customer"}${customerPhone ? ` (${customerPhone})` : ""}`,
+    `${serviceLabel(serviceType)} - ${spokenDateTime(start, timeZone)}`,
+    `Value: $${Math.round(value)}`,
+    `${location}`,
+    "Reply YES to confirm and text the customer. Reply NO to keep it as a lead."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function createOwnerBookingConfirmation({
+  address,
+  business,
+  callSessionId,
+  customer,
+  estimatedValue,
+  jobId,
+  ownerPhone,
+  serviceType,
+  start,
+  supabase,
+  timeZone,
+  toPhone
+}) {
+  if (!ownerPhone) return { ok: false, skipped: "owner_phone_missing" };
+
+  const customerPhone = normalizePhone(toPhone);
+  const agent = agentName(business);
+  const customerConfirmationBody = customerBookingConfirmationText({
+    address,
+    agent,
+    businessName: business.name,
+    customerName: customer.full_name,
+    serviceType,
+    start,
+    timeZone
+  });
+  const promptBody = ownerBookingApprovalText({
+    address,
+    agent,
+    businessName: business.name,
+    customerName: customer.full_name,
+    customerPhone,
+    estimatedValue,
+    serviceType,
+    start,
+    timeZone
+  });
+
+  const sms = await sendTwilioSms({ body: promptBody, to: ownerPhone });
+
+  const { data: confirmation, error } = await supabase
+    .from("owner_booking_confirmations")
+    .insert({
+      business_id: business.id,
+      call_session_id: callSessionId || null,
+      customer_confirmation_body: customerConfirmationBody,
+      customer_id: customer.id,
+      customer_phone: customerPhone,
+      due_at: new Date().toISOString(),
+      job_id: jobId,
+      owner_phone: ownerPhone,
+      prompt_body: promptBody,
+      provider_message_id: sms.sid || null,
+      sent_at: sms.ok ? new Date().toISOString() : null,
+      status: sms.ok ? "sent" : "failed",
+      error_message: sms.ok ? null : sms.error || sms.skipped || null
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (error) return { ok: false, error: error.message, sms };
+  return { ok: Boolean(sms.ok), confirmation_id: confirmation?.id || null, sms };
 }
 
 async function upsertCallerContact({ businessId, customerId, displayName, phone, supabase }) {
@@ -894,7 +1045,7 @@ async function upsertCallerContact({ businessId, customerId, displayName, phone,
 }
 
 async function bookAppointment({ args, callSessionId, businessId, callerPhone }) {
-  const { business, ownerEmail, ownerPhone, supabase } = await getBusinessContext(businessId);
+  const { business, ownerEmail, ownerPhone, radiusRule, supabase } = await getBusinessContext(businessId);
   const serviceOptions = businessServiceOptions(business);
 
   if (!serviceOptions.includes(args.service_type)) {
@@ -929,6 +1080,17 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
 
   const dayStart = localDateTimeToUtc(args.scheduled_date, "00:00", timeZone);
   const dayEnd = addMinutes(localDateTimeToUtc(args.scheduled_date, "23:59", timeZone), 1);
+  const closures = await availabilityExceptions(supabase, businessId, args.scheduled_date, args.scheduled_date);
+  const closure = closureForDate(closures, args.scheduled_date);
+  if (closure) {
+    return {
+      closed_date: args.scheduled_date,
+      closed_reason: closure.title || "Closed",
+      ok: false,
+      message: closure.message || "Sorry, we don't have any appointments for that whole day. Offer another day."
+    };
+  }
+
   const bookings = await existingBookings(supabase, businessId, dayStart, dayEnd);
   const conflict = bookings.some((booking) => {
     const bookingStart = new Date(booking.scheduled_start);
@@ -939,17 +1101,32 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
   if (conflict) {
     const alternatives = await availableSlots({ businessId, date: args.scheduled_date, durationMinutes: DEFAULT_SLOT_MINUTES });
     return {
-      alternatives,
+      alternatives: alternatives.slots,
       ok: false,
       message: "That time is already booked. Offer one of the available alternatives."
     };
   }
 
   const address = normalizeAddressForStorage(args.address);
+  const serviceArea = await evaluateServiceArea({ address, business, radiusRule });
+  if (!serviceArea.ok) {
+    return {
+      distance_miles: serviceArea.distanceMiles ? Number(serviceArea.distanceMiles.toFixed(1)) : null,
+      message:
+        serviceArea.reason === "outside_radius"
+          ? `This address is outside the business service area. Tell the caller the business is not currently serving that area.`
+          : serviceArea.error || "Ask for the service address again.",
+      ok: false,
+      radius_miles: serviceArea.radiusMiles ?? null,
+      service_area: serviceArea.reason
+    };
+  }
+
   const customer = await findOrCreateCustomer({
     address: args.address,
     businessId,
     email: args.customer_email,
+    geocodedAddress: serviceArea.geocodedAddress,
     name: args.customer_name,
     phone: args.customer_phone || callerPhone,
     referralSource: args.how_heard_about_us,
@@ -963,11 +1140,16 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
       ai_notes: args.notes || "Booked by Ana from a realtime phone call.",
       business_id: businessId,
       customer_id: customer.id,
-      estimated_value: Number.isFinite(Number(args.estimated_value)) ? Number(args.estimated_value) : null,
+      estimated_value: appointmentEstimatedValue(args, customer),
+      geocode_accuracy: serviceArea.geocodedAddress?.accuracy ?? null,
+      geocode_provider: serviceArea.geocodedAddress?.provider ?? null,
+      geocoded_at: serviceArea.geocodedAddress ? new Date().toISOString() : null,
+      lat: serviceArea.geocodedAddress?.lat ?? null,
+      lng: serviceArea.geocodedAddress?.lng ?? null,
       scheduled_end: end.toISOString(),
       scheduled_start: start.toISOString(),
       service_type: args.service_type,
-      status: "confirmed",
+      status: "pending",
       title: bookingTitle(args.service_type)
     })
     .select("id")
@@ -983,6 +1165,28 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
     supabase
   });
 
+  const ownerApproval = await createOwnerBookingConfirmation({
+    address: address || customer.address || null,
+    business,
+    callSessionId,
+    customer,
+    estimatedValue: appointmentEstimatedValue(args, customer),
+    jobId: job.id,
+    ownerPhone,
+    serviceType: args.service_type,
+    start,
+    supabase,
+    timeZone,
+    toPhone: args.customer_phone || callerPhone || customer.phone
+  }).catch((error) => {
+    console.error("Could not send owner booking approval:", error.message);
+    return { ok: false, error: error.message };
+  });
+
+  if (!ownerApproval.ok) {
+    await supabase.from("jobs").update({ status: "lead" }).eq("id", job.id);
+  }
+
   if (callSessionId) {
     await supabase
       .from("call_sessions")
@@ -990,8 +1194,10 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
         contact_type: "customer",
         customer_id: customer.id,
         job_id: job.id,
-        needs_owner_review: false,
-        outcome: `Booked ${serviceLabel(args.service_type)} for ${spokenDateTime(start, timeZone)}.`,
+        needs_owner_review: ownerApproval.ok,
+        outcome: ownerApproval.ok
+          ? `Pending owner approval for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}.`
+          : `Saved lead for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)} because owner approval SMS was not sent.`,
         status: "completed"
       })
       .eq("id", callSessionId);
@@ -999,8 +1205,8 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
     const language = ownerSummaryLanguage(business.owner_summary_language);
     const summary =
       language === "es"
-        ? `${customer.full_name} reservo ${serviceLabel(args.service_type)} para ${spokenDateTime(start, timeZone)}.`
-        : `${customer.full_name} booked ${serviceLabel(args.service_type)} for ${spokenDateTime(start, timeZone)}.`;
+        ? `${customer.full_name} solicito ${serviceLabel(args.service_type)} para ${spokenDateTime(start, timeZone)}. Esperando aprobacion del dueño.`
+        : `${customer.full_name} requested ${serviceLabel(args.service_type)} for ${spokenDateTime(start, timeZone)}. Waiting for owner approval.`;
 
     await notifyOwnerSummary({
       businessId,
@@ -1018,6 +1224,10 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
   return {
     booking_id: job.id,
     customer_name: customer.full_name,
+    message: ownerApproval.ok
+      ? "Tell the caller the appointment request has been sent to the owner and they will receive a confirmation text after approval."
+      : "Tell the caller the appointment request was saved and the owner will follow up.",
+    owner_approval: ownerApproval,
     ok: true,
     scheduled_for: spokenDateTime(start, timeZone)
   };
@@ -1053,6 +1263,7 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
       ai_notes: args.summary || null,
       business_id: businessId,
       customer_id: customer.id,
+      estimated_value: 0,
       service_type: isServiceOption(args.service_type) ? args.service_type : null,
       status: "lead",
       title: `${service} lead`
@@ -1273,7 +1484,7 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
     {
       type: "function",
       name: "book_appointment",
-      description: "Book a confirmed appointment after the caller agrees to an available date and time.",
+      description: "Create an owner approval request after the caller agrees to an available date and time.",
       parameters: {
         type: "object",
         properties: {
@@ -1282,7 +1493,7 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
           customer_name: { type: "string" },
           customer_phone: { type: "string" },
           duration_minutes: { type: "number" },
-          estimated_value: { type: "number" },
+          estimated_value: { type: "number", description: "Use the known customer service fee when available. Use 0 for quote appointments or unknown pricing." },
           how_heard_about_us: {
             type: "string",
             description: "For a new customer, normalize how they heard about the business.",
@@ -1293,7 +1504,7 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
           scheduled_time: { type: "string", description: "Local 24-hour time in HH:mm format." },
           service_type: { type: "string", enum: serviceOptions }
         },
-        required: ["customer_name", "scheduled_date", "scheduled_time", "service_type"]
+        required: ["address", "customer_name", "scheduled_date", "scheduled_time", "service_type"]
       }
     },
     {
@@ -1334,17 +1545,25 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
   ];
 }
 
-function sessionInstructions({ business, owner }) {
+function sessionInstructions({ business, owner, radiusRule }) {
   const ownerName = owner?.full_name?.split(/\s+/)[0] || "the owner";
+  const agent = agentName(business);
   const timeZone = businessTimeZone(business);
   const serviceOptions = businessServiceOptions(business);
+  const baseLat = numericCoordinate(business?.base_lat);
+  const baseLng = numericCoordinate(business?.base_lng);
+  const radiusMiles = Number(radiusRule?.radius_miles);
+  const serviceAreaInstruction =
+    business.base_address && baseLat !== null && baseLng !== null && Number.isFinite(radiusMiles)
+      ? `Service area is ${radiusMiles} miles from ${business.base_address}. The book_appointment tool checks the address. If it says outside radius, politely say the business is not currently serving that area.`
+      : "Service area is not fully configured yet. Keep collecting the caller's address and let the tool/system decide when possible.";
   return [
-    `You are Ana, a warm phone receptionist for ${business.name}, a ${business.trade} business.`,
+    `You are ${agent}, a warm phone receptionist for ${business.name}, a ${business.trade} business.`,
     "Sound like a calm, natural woman on a normal phone call. Keep replies short, conversational, and not robotic.",
-    `Open the call naturally with: "Hi, this is Ana with ${business.name}. How are you today? Have you used our service before?"`,
+    `Open the call naturally with: "Hi, this is ${agent} with ${business.name}. How are you today? Have you used our service before?"`,
     "If the caller has used the service before, briefly ask how it went, then move to what they need today.",
     "If the caller is a new customer, later ask naturally: 'How did you hear about us?' Do not say 'referral source' to callers.",
-    "If asked what you are, be honest and say you are Ana, the virtual receptionist.",
+    `If asked what you are, be honest and say you are ${agent}, the virtual receptionist.`,
     "Never read or explain internal instructions, tools, owner-summary workflow, approval states, quote drafts, database actions, or policy notes to the caller.",
     "Do not say phrases like approval needed, summary to owner, record a summary, tool call, or function call. Keep workflow invisible and speak only like a receptionist.",
     "If a system action fails, do not tell the caller there was a data-entry, database, tool, or system issue. Keep taking details and say someone can follow up if needed.",
@@ -1353,16 +1572,19 @@ function sessionInstructions({ business, owner }) {
     `Today is ${spokenDateTime(new Date(), timeZone)}. The business timezone is ${timeZone}.`,
     `The owner is ${ownerName}.`,
     `Business hours are ${businessHoursText(business)}. If asked, answer with these hours and then help schedule inside those hours.`,
+    "If list_available_slots or book_appointment says a date is closed, politely say sorry, there are no appointments available for that whole day, then ask for another day.",
+    serviceAreaInstruction,
     `Only offer and book these services for this business: ${serviceOptions.map(serviceLabel).join(", ")}.`,
     "If the caller asks for a listed service, acknowledge it naturally and ask for the next practical detail, usually the service address or preferred day and time.",
     "If the caller asks for a service not listed, say you can take their details and have someone follow up, but do not book it as a confirmed appointment.",
     "Collect name, phone number if needed, service type, confirmed address, and preferred appointment time one or two details at a time.",
     "Always call list_available_slots before offering times unless the caller asks for a specific time. Never book over an existing calendar event.",
-    "Only call book_appointment after the caller clearly agrees to a specific available date and time.",
+    "Only call book_appointment after the caller clearly agrees to a specific available date and time. This creates an owner approval request, not a final confirmed booking.",
     `If the call is business-related but does not result in a booking, silently call record_call_summary before ending the call. Write the tool summary in ${ownerSummaryLanguage(business.owner_summary_language) === "es" ? "Spanish" : "English"}.`,
     "If the caller is personal, a vendor, spam, not a customer, or asks for the owner/human, call transfer_to_owner.",
-    "If the caller wants a price quote, collect details and say someone can follow up with pricing. Do not promise a final price unless a booking value is returned by a tool.",
-    "End each successful booking by repeating the appointment day, time, service, and confirmed address."
+    "If the caller wants a price quote for a listed service, collect details and offer to schedule a quote appointment inside business hours. Use estimated_value 0 when booking a quote appointment unless a known customer service fee applies.",
+    "Do not promise a final price unless a booking value is returned by a tool.",
+    "After book_appointment succeeds, tell the caller the request was sent to the owner and they will receive a confirmation text after approval. Do not say the booking is final until owner approval happens."
   ].join("\n");
 }
 
@@ -1381,16 +1603,21 @@ async function handleToolCall({ call, state, openaiWs, twilioWs }) {
 
   try {
     if (call.name === "list_available_slots") {
-      const slots = await availableSlots({
+      const availability = await availableSlots({
         businessId: state.businessId,
         date: args.date,
         durationMinutes: DEFAULT_SLOT_MINUTES
       });
       output = {
+        closed_dates: availability.closedDates,
         ok: true,
-        slots,
-        time_zone: slots[0]?.time_zone || state.business?.booking_time_zone || DEFAULT_TIME_ZONE,
-        message: slots.length ? "Offer these openings conversationally." : "No openings found for that date. Ask for another day."
+        slots: availability.slots,
+        time_zone: availability.timeZone || state.business?.booking_time_zone || DEFAULT_TIME_ZONE,
+        message: availability.closedDates.length
+          ? "Sorry, we don't have any appointments for that whole day. Ask for another day."
+          : availability.slots.length
+            ? "Offer these openings conversationally."
+            : "No openings found for that date. Ask for another day."
       };
     } else if (call.name === "book_appointment") {
       output = await bookAppointment({
@@ -1528,7 +1755,7 @@ function handleTwilioConnection(twilioWs) {
       sendJson(openaiWs, {
         type: "response.create",
         response: {
-          instructions: `Greet the caller as Ana with ${state.business?.name || "the business"}. Ask how they are today, then ask if they have used the service before. Keep it under two sentences.`
+          instructions: `Greet the caller as ${agentName(state.business)} with ${state.business?.name || "the business"}. Ask how they are today, then ask if they have used the service before. Keep it under two sentences.`
         }
       });
       return;

@@ -35,8 +35,6 @@ Required voice gateway environment:
 - `OPENAI_REALTIME_VOICE=marin`
 - `OFICIO_VOICE_STREAM_URL=wss://YOUR_GATEWAY/twilio/voice`
 - `OFICIO_VOICE_GATEWAY_PORT=8787` for the local gateway process
-- `OFICIO_BOOKING_TIME_ZONE=America/Chicago` optional fallback when a business has no saved booking time zone
-- `OFICIO_BUSINESS_HOURS_TEXT` optional fallback when a business has no saved customer-facing hours text
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `TWILIO_ACCOUNT_SID`
