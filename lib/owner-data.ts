@@ -30,6 +30,7 @@ export type CustomerReminder = {
 };
 
 export type OwnerPortalData = {
+  generatedAt: string;
   user: UserProfile;
   business: Business;
   radiusRule: ServiceRadiusRule | null;
@@ -277,6 +278,8 @@ async function localizeSummaries({
 }
 
 export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage = "es"): Promise<OwnerPortalData> {
+  const requestTime = new Date();
+  const generatedAt = requestTime.toISOString();
   const supabase = await createClient();
   const {
     data: { user }
@@ -302,8 +305,8 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
   if (!membership) redirect("/owner/no-business");
 
   const businessId = membership.business_id as string;
-  const reminderDueDate = new Date().toISOString().slice(0, 10);
-  const monthStart = new Date();
+  const reminderDueDate = generatedAt.slice(0, 10);
+  const monthStart = new Date(requestTime);
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
   const nextMonthStart = new Date(monthStart);
@@ -401,7 +404,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
       }
     }
   }
-  const now = new Date();
+  const now = requestTime;
 
   for (const job of jobs) {
     if (!job.customer_id || !job.scheduled_start || job.status === "canceled") {
@@ -454,6 +457,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
   });
 
   return {
+    generatedAt,
     user: profile,
     business: businessResult.data,
     radiusRule: radiusResult.data ?? null,

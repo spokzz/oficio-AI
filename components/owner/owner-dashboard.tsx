@@ -39,6 +39,7 @@ import { AddressLookupInput } from "@/components/ui/address-lookup-input";
 import { StatusPill } from "@/components/ui/status-pill";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
+import { createClient as createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { customerSourceOptions, type CustomerSourceOption } from "@/lib/customer-sources";
 import { serviceOptions, type ServiceOption } from "@/lib/services";
 import type { OwnerPortalData } from "@/lib/owner-data";
@@ -962,6 +963,8 @@ export function OwnerDashboard({
   const [editBooking, setEditBooking] = useState<Job | null>(null);
   const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [clientNow, setClientNow] = useState<Date | null>(null);
+  const callRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, startDeleteTransition] = useTransition();
   const router = useRouter();
   const t = copy[language];
@@ -986,12 +989,87 @@ export function OwnerDashboard({
   const currentActiveCall = useMemo(() => activeCall(data.calls), [data.calls]);
   const mostRecentCall = useMemo(() => latestCall(data.calls), [data.calls]);
   const trackedCall = currentActiveCall ?? mostRecentCall;
-  const trackedCallDuration = trackedCall ? formatDuration(callDurationSeconds(trackedCall)) : "00:00";
+  const durationNow = clientNow ?? new Date(data.generatedAt);
+  const trackedCallDuration = trackedCall ? formatDuration(callDurationSeconds(trackedCall, durationNow)) : "00:00";
 
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(null), 2500);
   }, []);
+
+  const refreshCallData = useCallback(() => {
+    if (callRefreshTimeoutRef.current) return;
+
+    callRefreshTimeoutRef.current = setTimeout(() => {
+      callRefreshTimeoutRef.current = null;
+      router.refresh();
+    }, 250);
+  }, [router]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setClientNow(new Date()), 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    const supabase = createBrowserSupabaseClient();
+    const channel = supabase
+      .channel(`owner-portal-live-${data.business.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          filter: `business_id=eq.${data.business.id}`,
+          schema: "public",
+          table: "call_sessions"
+        },
+        refreshCallData
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          filter: `business_id=eq.${data.business.id}`,
+          schema: "public",
+          table: "customers"
+        },
+        refreshCallData
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          filter: `business_id=eq.${data.business.id}`,
+          schema: "public",
+          table: "jobs"
+        },
+        refreshCallData
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          filter: `business_id=eq.${data.business.id}`,
+          schema: "public",
+          table: "ai_summaries"
+        },
+        refreshCallData
+      )
+      .subscribe();
+    const intervalMs = currentActiveCall ? 5000 : activeTab === "home" ? 15000 : 20000;
+    const intervalId = window.setInterval(refreshCallData, intervalMs);
+
+    return () => {
+      window.clearInterval(intervalId);
+      supabase.removeChannel(channel);
+
+      if (callRefreshTimeoutRef.current) {
+        clearTimeout(callRefreshTimeoutRef.current);
+        callRefreshTimeoutRef.current = null;
+      }
+    };
+  }, [activeTab, currentActiveCall, data.business.id, refreshCallData]);
 
   const handleCustomerAdded = useCallback(
     (message: string) => {
