@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildAiCallUsage, monthWindow, sumUsageMinutes } from "@/lib/call-usage";
 import { normalizePhone, phoneSearchValues } from "@/lib/phone";
 import { xmlEscape } from "@/lib/twilio";
 
@@ -33,6 +34,31 @@ export type KnownCaller = {
   customerId: string | null;
   displayName: string | null;
 };
+
+export async function aiCallAllowanceStatus(businessId: string) {
+  const supabase = createAdminClient();
+  const usageWindow = monthWindow();
+  const [{ data: billing }, { data: usageEvents }] = await Promise.all([
+    supabase.from("manual_billing_accounts").select("plan_name").eq("business_id", businessId).maybeSingle<{ plan_name: string | null }>(),
+    supabase
+      .from("usage_events")
+      .select("quantity")
+      .eq("business_id", businessId)
+      .eq("event_type", "qualified_business_voice")
+      .eq("unit", "minute")
+      .gte("occurred_at", usageWindow.monthStart.toISOString())
+      .lt("occurred_at", usageWindow.nextMonthStart.toISOString())
+  ]);
+  const usage = buildAiCallUsage({
+    planName: billing?.plan_name,
+    usedMinutes: sumUsageMinutes((usageEvents ?? []) as Array<{ quantity: number | string | null }>)
+  });
+
+  return {
+    allowed: usage.planKey === "vip" || usage.usedMinutes < usage.allowanceMinutes,
+    usage
+  };
+}
 
 export async function findBusinessRoutingContext(toPhone: string | null | undefined): Promise<RoutingContext | null> {
   const supabase = createAdminClient();

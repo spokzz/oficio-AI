@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
+import { buildAiCallUsage, monthWindow } from "@/lib/call-usage";
 import { createClient } from "@/lib/supabase/server";
-import type { Business, BusinessAvailabilityException, ManualBillingAccount, ServiceRadiusRule, UserProfile } from "@/lib/types";
+import type { AiCallUsage, Business, BusinessAvailabilityException, ManualBillingAccount, ServiceRadiusRule, UserProfile } from "@/lib/types";
 
 export type AdminAccount = Business & {
+  aiCallUsage: AiCallUsage;
   business_availability_exceptions?: BusinessAvailabilityException[] | null;
   manual_billing_accounts?: ManualBillingAccount[] | null;
   service_radius_rules?: ServiceRadiusRule[] | null;
@@ -50,6 +52,8 @@ export async function getAdminPortalData(): Promise<AdminPortalData> {
   >;
   const businessIds = baseAccounts.map((account) => account.id);
   const ownersByBusiness = new Map<string, UserProfile[]>();
+  const usageByBusiness = new Map<string, number>();
+  const usageWindow = monthWindow();
 
   if (businessIds.length) {
     const { data: memberships } = await supabase
@@ -76,10 +80,31 @@ export async function getAdminPortalData(): Promise<AdminPortalData> {
         ownersByBusiness.set(String(membership.business_id), businessOwners);
       }
     }
+
+    const { data: usageEvents } = await supabase
+      .from("usage_events")
+      .select("business_id,quantity")
+      .in("business_id", businessIds)
+      .eq("event_type", "qualified_business_voice")
+      .eq("unit", "minute")
+      .gte("occurred_at", usageWindow.monthStart.toISOString())
+      .lt("occurred_at", usageWindow.nextMonthStart.toISOString());
+
+    for (const event of usageEvents ?? []) {
+      const businessId = String(event.business_id);
+      const quantity = Number(event.quantity ?? 0);
+      if (Number.isFinite(quantity)) {
+        usageByBusiness.set(businessId, (usageByBusiness.get(businessId) ?? 0) + quantity);
+      }
+    }
   }
 
   const typedAccounts: AdminAccount[] = baseAccounts.map((account) => ({
     ...account,
+    aiCallUsage: buildAiCallUsage({
+      planName: account.manual_billing_accounts?.[0]?.plan_name,
+      usedMinutes: usageByBusiness.get(account.id) ?? 0
+    }),
     owners: ownersByBusiness.get(account.id) ?? []
   }));
   const totals = {

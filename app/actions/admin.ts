@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { aiCallPlanOptions } from "@/lib/call-usage";
 import { geocodeAddress } from "@/lib/geocoding";
 import { normalizePhone } from "@/lib/phone";
 import { isServiceOption, serviceOptionDefaults } from "@/lib/services";
@@ -37,6 +38,7 @@ const portingStatuses = ["not_started", "collecting_info", "submitted", "complet
 const ownerSummaryLanguages = ["en", "es"] as const;
 const ownerSummaryChannels = ["sms", "email"] as const;
 const billingStatuses = ["trial", "active", "past_due", "paused", "canceled"] as const;
+const aiCallPlanNames = aiCallPlanOptions.map((plan) => plan.label);
 
 function aiAgentName(value: FormDataEntryValue | null) {
   return String(value ?? "Ana").replace(/\s+/g, " ").trim() || "Ana";
@@ -290,7 +292,7 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
 
   const { error: billingError } = await supabase.from("manual_billing_accounts").insert({
     business_id: businessId,
-    plan_name: "Growth",
+    plan_name: "Premium",
     monthly_price: 149,
     onboarding_fee: 199,
     onboarding_paid: false,
@@ -515,7 +517,7 @@ export async function updateAdminAccount(_state: AdminAccountState, formData: Fo
   const businessHoursText = String(formData.get("businessHoursText") ?? "Monday through Friday, 8:00 AM to 5:00 PM").trim();
   const agentName = aiAgentName(formData.get("aiAgentName"));
   const ownerApproved = formData.get("phoneSetupOwnerApproved") === "on";
-  const planName = String(formData.get("planName") ?? "Growth").trim();
+  const planName = String(formData.get("planName") ?? "Premium").trim();
   const monthlyPrice = Number(formData.get("monthlyPrice") ?? 149);
   const onboardingFee = Number(formData.get("onboardingFee") ?? 199);
   const onboardingPaid = formData.get("onboardingPaid") === "on";
@@ -549,7 +551,7 @@ export async function updateAdminAccount(_state: AdminAccountState, formData: Fo
   if (!businessHoursText || businessHoursText.length > 240) return { error: "Enter business hours under 240 characters." };
   if (businessAddress.length > 240) return { error: "Enter a business address under 240 characters." };
   if (agentName.length > 40) return { error: "Enter an AI agent name under 40 characters." };
-  if (!planName || planName.length > 80) return { error: "Enter a plan name under 80 characters." };
+  if (!aiCallPlanNames.includes(planName)) return { error: "Choose a valid AI call plan." };
   if (!Number.isFinite(monthlyPrice) || monthlyPrice < 0) return { error: "Enter a valid monthly price." };
   if (!Number.isFinite(onboardingFee) || onboardingFee < 0) return { error: "Enter a valid onboarding fee." };
 

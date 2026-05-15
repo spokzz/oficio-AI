@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  aiCallAllowanceStatus,
   businessFlowTwiml,
   businessScreeningPrompt,
   createCallSession,
@@ -54,6 +55,24 @@ export async function POST(request: Request) {
     });
 
     return twimlResponse(transferToOwnerTwiml(context));
+  }
+
+  const allowanceStatus = await aiCallAllowanceStatus(context.business.id);
+
+  if (!allowanceStatus.allowed) {
+    await createCallSession({
+      businessId: context.business.id,
+      contactType: knownCaller.classification,
+      customerId: knownCaller.customerId,
+      fromPhone: params.From,
+      outcome: `${allowanceStatus.usage.planName} monthly AI call minute limit reached.`,
+      providerCallId: params.CallSid,
+      screeningResult: "monthly_ai_call_limit_reached",
+      status: "completed",
+      toPhone: params.To
+    });
+
+    return twimlResponse(sayAndHangup("Sorry, this business is not accepting AI receptionist calls right now. Please try again later."));
   }
 
   if (knownCaller.classification === "customer") {

@@ -80,6 +80,14 @@ const copy = {
     todayJobs: "Trabajos hoy",
     revenue: "Ingresos",
     recovered: "Llamadas recuperadas",
+    aiCallMinutes: "Minutos AI",
+    aiCallMinutesSubtitle: "Uso mensual incluido en tu plan.",
+    plan: "Plan",
+    usedMinutes: "Minutos usados",
+    remainingMinutes: "Minutos restantes",
+    includedMinutes: "Minutos incluidos",
+    vipOverage: "Exceso VIP",
+    noOverageBilling: "Sin cobro por exceso",
     today: "Hoy",
     currentData: "Datos actuales",
     aiOutcomes: "Resultados AI",
@@ -331,6 +339,14 @@ const copy = {
     todayJobs: "Jobs today",
     revenue: "Revenue",
     recovered: "Recovered calls",
+    aiCallMinutes: "AI minutes",
+    aiCallMinutesSubtitle: "Monthly usage included with your plan.",
+    plan: "Plan",
+    usedMinutes: "Used minutes",
+    remainingMinutes: "Remaining minutes",
+    includedMinutes: "Included minutes",
+    vipOverage: "VIP overage",
+    noOverageBilling: "No overage billing",
     today: "Today",
     currentData: "Current data",
     aiOutcomes: "AI outcomes",
@@ -732,6 +748,13 @@ function serviceFeeLabel(fee?: number | null) {
     maximumFractionDigits: 2,
     minimumFractionDigits: value % 1 === 0 ? 0 : 2,
     style: "currency"
+  }).format(value);
+}
+
+function formatMinutes(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: value < 10 && value % 1 !== 0 ? 1 : 0,
+    minimumFractionDigits: 0
   }).format(value);
 }
 
@@ -1190,6 +1213,7 @@ export function OwnerDashboard({
             </section>
           </div>
           <CustomerReminderList data={data} labels={t} />
+          <AiCallMinutesCard data={data} labels={t} />
           <div className="grid three-col">
             <section className="card span-2">
               <div className="analytics-card-header">
@@ -1435,6 +1459,48 @@ function CustomerReminderList({ data, labels }: { data: OwnerPortalData; labels:
       ) : (
         <div className="empty-state">{labels.noCustomerReminders}</div>
       )}
+    </section>
+  );
+}
+
+function AiCallMinutesCard({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
+  const usage = data.aiCallUsage;
+  const overageText = usage.overageRatePerMinute
+    ? `${formatMinutes(usage.billableOverageMinutes)} min · ${formatCurrency(usage.overageAmount)}`
+    : labels.noOverageBilling;
+
+  return (
+    <section className="card call-minutes-card">
+      <div className="section-card-header">
+        <div>
+          <h2>{labels.aiCallMinutes}</h2>
+          <p className="meta">{labels.aiCallMinutesSubtitle}</p>
+        </div>
+        <strong className="customer-count-badge">{usage.monthLabel}</strong>
+      </div>
+      <div className="usage-meter large" aria-label={`${usage.usagePercent.toFixed(0)} percent used`}>
+        <span style={{ width: `${usage.usagePercent}%` }} />
+      </div>
+      <div className="grid three-col">
+        <article className="row-card">
+          <strong>{labels.plan}</strong>
+          <div className="meta">
+            {usage.planName} · {formatMinutes(usage.allowanceMinutes)} {labels.includedMinutes.toLowerCase()}
+          </div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.usedMinutes}</strong>
+          <div className="meta">{formatMinutes(usage.usedMinutes)} min</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.remainingMinutes}</strong>
+          <div className="meta">{formatMinutes(usage.remainingMinutes)} min</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.vipOverage}</strong>
+          <div className="meta">{overageText}</div>
+        </article>
+      </div>
     </section>
   );
 }

@@ -47,10 +47,12 @@ const SLOT_STEP_MINUTES = Number(process.env.OFICIO_BOOKING_SLOT_STEP_MINUTES ||
 const WORKDAY_START_HOUR = Number(process.env.OFICIO_BOOKING_DAY_START_HOUR || 8);
 const WORKDAY_END_HOUR = Number(process.env.OFICIO_BOOKING_DAY_END_HOUR || 17);
 const OPENAI_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-mini";
+const OPENAI_TRANSLATION_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-5.4-nano";
 const OPENAI_VOICE = process.env.OPENAI_REALTIME_VOICE || "marin";
 const PORT = Number(process.env.OFICIO_VOICE_GATEWAY_PORT || 8787);
 const NEXT_APP_ORIGIN = process.env.OFICIO_NEXT_APP_ORIGIN || "http://localhost:3000";
 const GEOCODIO_ENDPOINT = "https://api.geocod.io/v1.9/geocode";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const BUSINESS_HOURS_TEXT =
   process.env.OFICIO_BUSINESS_HOURS_TEXT ||
   `Monday through Friday, ${String(WORKDAY_START_HOUR)}:00 AM to ${WORKDAY_END_HOUR > 12 ? WORKDAY_END_HOUR - 12 : WORKDAY_END_HOUR}:00 PM`;
@@ -59,6 +61,10 @@ function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function optionalEnv(name) {
+  return process.env[name]?.trim() || null;
 }
 
 function supabaseAdmin() {
@@ -270,6 +276,57 @@ function serviceLabel(serviceType) {
   if (serviceType === "tree_cutting") return "Tree services";
   if (serviceType === "mowing") return "Lawn mowing";
   return serviceType.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ownerServiceLabel(serviceType, language = "en") {
+  if (language !== "es") return serviceLabel(serviceType || "service");
+
+  const labels = {
+    irrigation: "riego",
+    landscaping: "paisajismo",
+    mowing: "corte de cesped",
+    tree_cutting: "servicio de arboles",
+    yard_cleanup: "limpieza de patio"
+  };
+
+  return labels[serviceType] || serviceLabel(serviceType || "servicio");
+}
+
+function friendlyLeadSummary({ address, customerName, details, language, scheduledFor, serviceType }) {
+  const name = customerName || (language === "es" ? "un cliente nuevo" : "a new customer");
+  const service = ownerServiceLabel(serviceType, language);
+  const location = address ? (language === "es" ? ` en ${address}` : ` at ${address}`) : "";
+  const timing = scheduledFor ? (language === "es" ? ` para ${scheduledFor}` : ` on ${scheduledFor}`) : "";
+  const note = compactCallText(details, 220);
+
+  if (language === "es") {
+    return [`Nuevo cliente potencial: ${name}${location}.`, `Quiere ${service}${timing}.`, note ? `Notas de Ana: ${note}` : ""]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return [`New lead from ${name}${location}.`, `They want ${service}${timing}.`, note ? `Ana notes: ${note}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function friendlyBookingSummary({ address, customerName, language, ownerApprovalSent, scheduledFor, serviceType }) {
+  const base = friendlyLeadSummary({
+    address,
+    customerName,
+    language,
+    scheduledFor,
+    serviceType
+  });
+  const next = ownerApprovalSent
+    ? language === "es"
+      ? "Ana envio la solicitud al dueno para aprobarla."
+      : "Ana sent it to the owner for approval."
+    : language === "es"
+      ? "Ana lo guardo como lead porque no pudo enviar la aprobacion por texto."
+      : "Ana saved it as a lead because the approval text could not be sent.";
+
+  return `${base} ${next}`;
 }
 
 function agentName(business) {
@@ -532,10 +589,54 @@ async function getBusinessContext(businessId) {
   };
 }
 
+async function getKnownCustomerForCall({ callSessionId, supabase }) {
+  if (!callSessionId) return null;
+
+  const { data: call, error: callError } = await supabase
+    .from("call_sessions")
+    .select("customer_id")
+    .eq("id", callSessionId)
+    .maybeSingle();
+
+  if (callError || !call?.customer_id) {
+    if (callError) console.error("Could not load known caller context:", callError.message);
+    return null;
+  }
+
+  const { data: customer, error: customerError } = await supabase
+    .from("customers")
+    .select("id,full_name,phone,email,address,recurring_service_type,service_fee")
+    .eq("id", call.customer_id)
+    .maybeSingle();
+
+  if (customerError) {
+    console.error("Could not load known customer context:", customerError.message);
+    return null;
+  }
+
+  return customer || null;
+}
+
 function compactCallText(value, maxLength = 700) {
   const compact = String(value ?? "").replace(/\s+/g, " ").trim();
   if (compact.length <= maxLength) return compact;
   return `${compact.slice(0, maxLength - 3)}...`;
+}
+
+function textFromOpenAiResponse(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) return payload.output_text.trim();
+  if (!Array.isArray(payload.output)) return null;
+
+  const parts = [];
+  for (const item of payload.output) {
+    if (!Array.isArray(item?.content)) continue;
+    for (const block of item.content) {
+      if (typeof block?.text === "string" && block.text.trim()) parts.push(block.text.trim());
+    }
+  }
+
+  return parts.join(" ").trim() || null;
 }
 
 function fallbackTranscriptSummary(transcript, callerPhone, language = "en", fallbackOutcome) {
@@ -755,9 +856,59 @@ async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fal
 
 async function rewriteOwnerText({ kind = "summary", language, text }) {
   const compactText = compactCallText(text, 700);
-  void kind;
-  void language;
-  return compactText;
+  if (!compactText) return compactText;
+
+  const apiKey = optionalEnv("OPENAI_API_KEY");
+  if (!apiKey || process.env.OFICIO_OWNER_TRANSLATION_ENABLED === "false") {
+    return compactText;
+  }
+
+  const target = ownerSummaryLanguage(language) === "es" ? "Spanish" : "English";
+
+  try {
+    const response = await fetch(OPENAI_RESPONSES_URL, {
+      body: JSON.stringify({
+        input: [
+          {
+            content: [
+              {
+                type: "input_text",
+                text:
+                  `Rewrite this owner-facing ${kind} in clear ${target}. ` +
+                  "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
+                  "Do not add facts. Return only the rewritten text."
+              }
+            ],
+            role: "developer"
+          },
+          {
+            content: [{ type: "input_text", text: compactText }],
+            role: "user"
+          }
+        ],
+        max_output_tokens: 260,
+        model: OPENAI_TRANSLATION_MODEL,
+        store: false,
+        text: { verbosity: "low" }
+      }),
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      console.error("Owner summary rewrite failed:", response.status, payload);
+      return compactText;
+    }
+
+    return compactCallText(textFromOpenAiResponse(await response.json()) || compactText, 700);
+  } catch (error) {
+    console.error("Owner summary rewrite failed:", error);
+    return compactText;
+  }
 }
 
 async function summarizeTranscript({ callerPhone, fallbackOutcome, language, transcript }) {
@@ -1226,12 +1377,45 @@ async function upsertCallerContact({ businessId, customerId, displayName, phone,
   if (error) throw new Error(error.message);
 }
 
-async function bookAppointment({ args, callSessionId, businessId, callerPhone }) {
+async function bookAppointment({ args, callSessionId, businessId, callerPhone, knownCustomer }) {
   const { business, ownerEmail, ownerPhone, radiusRule, supabase } = await getBusinessContext(businessId);
   const serviceOptions = businessServiceOptions(business);
+  const existingCustomer = knownCustomer?.id
+    ? knownCustomer
+    : callSessionId
+      ? await getKnownCustomerForCall({ callSessionId, supabase })
+      : null;
+  const providedAddress = normalizeAddressForStorage(args.address);
+  const savedAddress = normalizeAddressForStorage(existingCustomer?.address);
+  const addressConfirmed = args.address_confirmed === true || String(args.address_confirmed).toLowerCase() === "true";
 
   if (!serviceOptions.includes(args.service_type)) {
     return { ok: false, message: "That service is not in this business's service list.", service_options: serviceOptions };
+  }
+
+  if (existingCustomer?.id && savedAddress && !addressConfirmed) {
+    return {
+      customer_address: savedAddress,
+      customer_name: existingCustomer.full_name,
+      ok: false,
+      message: `Before booking, warmly confirm the saved address with the caller. Say something like: "Perfect, ${String(existingCustomer.full_name || "there").split(/\s+/)[0]} - is this still for ${savedAddress}, or are we going somewhere different today?" Only call book_appointment again after they confirm the address or give a new one.`
+    };
+  }
+
+  if (!providedAddress && savedAddress && addressConfirmed) {
+    args.address = savedAddress;
+  }
+
+  if (!normalizeAddressForStorage(args.address)) {
+    return { ok: false, message: "Ask for the service address before booking." };
+  }
+
+  if (!addressConfirmed) {
+    return {
+      ok: false,
+      message:
+        "Before booking, repeat the service address in a friendly way and ask the caller to confirm it. Only call book_appointment again after they confirm."
+    };
   }
 
   if (!args.scheduled_date || !args.scheduled_time) {
@@ -1385,10 +1569,14 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone })
       .eq("id", callSessionId);
 
     const language = ownerSummaryLanguage(business.owner_summary_language);
-    const summary =
-      language === "es"
-        ? `${customer.full_name} solicito ${serviceLabel(args.service_type)} para ${spokenDateTime(start, timeZone)}. Esperando aprobacion del dueño.`
-        : `${customer.full_name} requested ${serviceLabel(args.service_type)} for ${spokenDateTime(start, timeZone)}. Waiting for owner approval.`;
+    const summary = friendlyBookingSummary({
+      address: address || customer.address || null,
+      customerName: customer.full_name,
+      language,
+      ownerApprovalSent: ownerApproval.ok,
+      scheduledFor: spokenDateTime(start, timeZone),
+      serviceType: args.service_type
+    });
 
     await notifyOwnerSummary({
       businessId,
@@ -1429,11 +1617,15 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
   });
   const language = ownerSummaryLanguage(business.owner_summary_language);
   const service = isServiceOption(args.service_type) ? serviceLabel(args.service_type) : args.service_type || "service";
-  const rawSummary =
-    language === "es"
-      ? `${customer.full_name} llamo sobre ${service}. ${args.summary}`
-      : `${customer.full_name} called about ${service}. ${args.summary}`;
-  const summary = await rewriteOwnerText({ kind: "summary", language, text: rawSummary });
+  const requestedDay = cleanupExtractedPhrase([args.preferred_date, args.preferred_time].filter(Boolean).join(" "), 80);
+  const summary = friendlyLeadSummary({
+    address: address || customer.address || null,
+    customerName: customer.full_name,
+    details: args.summary,
+    language,
+    scheduledFor: requestedDay,
+    serviceType: isServiceOption(args.service_type) ? args.service_type : service
+  });
   const actionNeeded =
     args.action_needed ||
     (language === "es" ? "Revisar y hacer seguimiento con el cliente." : "Review and follow up with the customer.");
@@ -1710,6 +1902,11 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
         type: "object",
         properties: {
           address: { type: "string" },
+          address_confirmed: {
+            type: "boolean",
+            description:
+              "True only after the caller verbally confirms the service address during this call. For an existing customer, confirm their saved address or ask for the new address first."
+          },
           customer_email: { type: "string" },
           customer_name: { type: "string" },
           customer_phone: { type: "string" },
@@ -1725,7 +1922,7 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
           scheduled_time: { type: "string", description: "Local 24-hour time in HH:mm format." },
           service_type: { type: "string", enum: serviceOptions }
         },
-        required: ["address", "customer_name", "scheduled_date", "scheduled_time", "service_type"]
+        required: ["address_confirmed", "customer_name", "scheduled_date", "scheduled_time", "service_type"]
       }
     },
     {
@@ -1757,6 +1954,14 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
             description: "For a new customer, normalize how they heard about the business.",
             enum: CUSTOMER_SOURCE_OPTIONS
           },
+          preferred_date: {
+            type: "string",
+            description: "Day or date the caller wants, if they mentioned one but did not book a confirmed slot."
+          },
+          preferred_time: {
+            type: "string",
+            description: "Time of day the caller wants, if they mentioned one but did not book a confirmed slot."
+          },
           service_type: { type: "string" },
           summary: { type: "string" }
         },
@@ -1781,11 +1986,14 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
   ];
 }
 
-function sessionInstructions({ business, owner, radiusRule }) {
+function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
   const ownerName = owner?.full_name?.split(/\s+/)[0] || "the owner";
   const agent = agentName(business);
   const timeZone = businessTimeZone(business);
   const serviceOptions = businessServiceOptions(business);
+  const knownCustomerName = String(knownCustomer?.full_name || "").trim();
+  const knownCustomerFirstName = knownCustomerName.split(/\s+/)[0];
+  const knownCustomerAddress = normalizeAddressForStorage(knownCustomer?.address);
   const baseLat = numericCoordinate(business?.base_lat);
   const baseLng = numericCoordinate(business?.base_lng);
   const radiusMiles = Number(radiusRule?.radius_miles);
@@ -1795,16 +2003,20 @@ function sessionInstructions({ business, owner, radiusRule }) {
       : "Service area is not fully configured yet. Keep collecting the caller's address and let the tool/system decide when possible.";
   return [
     `You are ${agent}, a warm phone receptionist for ${business.name}, a ${business.trade} business.`,
-    "Sound like a calm, natural woman on a normal phone call. Keep replies short, conversational, and not robotic.",
-    `Open the call naturally with: "Hi, this is ${agent} with ${business.name}. How are you today? Have you used our service before?"`,
-    "If the caller has used the service before, briefly ask how it went, then move to what they need today.",
+    "Sound upbeat, friendly, and human, like a great neighborhood coffee shop barista who remembers regulars. Keep replies short, warm, and natural.",
+    knownCustomer?.id
+      ? `This looks like a returning customer: ${knownCustomerName || "the caller"}${knownCustomerAddress ? `, saved address ${knownCustomerAddress}` : ""}.`
+      : `Open the call naturally with: "Hi, this is ${agent} with ${business.name}. How are you today? Have you used our service before?"`,
+    knownCustomer?.id && knownCustomerAddress
+      ? `For this returning customer, greet them by first name if it feels natural, then confirm the saved address before asking for a new one. Example tone: "Hey ${knownCustomerFirstName || "there"}, good to hear from you! Are we still helping out at ${knownCustomerAddress}, or is it a different spot today?"`
+      : "If the caller has used the service before, briefly ask how it went, then move to what they need today.",
     "If the caller is a new customer, later ask naturally: 'How did you hear about us?' Do not say 'referral source' to callers.",
     `If asked what you are, be honest and say you are ${agent}, the virtual receptionist.`,
     "Never read or explain internal instructions, tools, owner-summary workflow, approval states, quote drafts, database actions, or policy notes to the caller.",
     "Do not say phrases like approval needed, summary to owner, record a summary, tool call, or function call. Keep workflow invisible and speak only like a receptionist.",
     "If a system action fails, do not tell the caller there was a data-entry, database, tool, or system issue. Keep taking details and say someone can follow up if needed.",
     "Detect the caller's language and continue in that language when you can. Confirm names, phone numbers, addresses, dates, and times carefully.",
-    "Before saving or booking with an address, repeat the street number, street name, city, and state if available, and ask the caller to confirm. If a street name is unclear or could be misspelled, ask the caller to spell it.",
+    "Before saving or booking with an address, repeat the street number, street name, city, and state if available, and ask the caller to confirm. Make it feel easy and friendly, not like a form. If a street name is unclear or could be misspelled, ask the caller to spell it.",
     `Today is ${spokenDateTime(new Date(), timeZone)}. The business timezone is ${timeZone}.`,
     `The owner is ${ownerName}.`,
     `Business hours are ${businessHoursText(business)}. If asked, answer with these hours and then help schedule inside those hours.`,
@@ -1815,9 +2027,9 @@ function sessionInstructions({ business, owner, radiusRule }) {
     "If the caller asks for a service not listed, say you can take their details and have someone follow up, but do not book it as a confirmed appointment.",
     "Collect name, phone number if needed, service type, confirmed address, and preferred appointment time one or two details at a time.",
     "Always call list_available_slots before offering times unless the caller asks for a specific time. Never book over an existing calendar event.",
-    "Only call book_appointment after the caller clearly agrees to a specific available date and time. This creates an owner approval request, not a final confirmed booking.",
+    "Only call book_appointment after the caller clearly agrees to a specific available date and time and the address has been confirmed during this call. Set address_confirmed true only after that verbal confirmation. This creates an owner approval request, not a final confirmed booking.",
     "After saving a booking request or lead details, ask the caller if there is anything else you can help with.",
-    `If the call is business-related but does not result in a booking, silently call record_call_summary before ending the call. Write the tool summary in ${ownerSummaryLanguage(business.owner_summary_language) === "es" ? "Spanish" : "English"}.`,
+    `If the call is business-related but does not result in a booking, silently call record_call_summary before ending the call. Include the customer name, confirmed address when available, service/work requested, and preferred day/time if the caller mentioned one. Write the tool summary in ${ownerSummaryLanguage(business.owner_summary_language) === "es" ? "Spanish" : "English"}.`,
     "When the caller says no, thanks, thank you, goodbye, that's all, or otherwise clearly has nothing else, call end_call. After end_call, say a short goodbye like 'Okay, I am hanging up now. Have a good day.' and stop talking.",
     "If the caller is personal, a vendor, spam, not a customer, or asks for the owner/human, call transfer_to_owner.",
     "If the caller wants a price quote for a listed service, collect details and offer to schedule a quote appointment inside business hours. Use estimated_value 0 when booking a quote appointment unless a known customer service fee applies.",
@@ -1862,7 +2074,8 @@ async function handleToolCall({ call, state, openaiWs, twilioWs }) {
         args,
         businessId: state.businessId,
         callerPhone: state.fromPhone,
-        callSessionId: state.callSessionId
+        callSessionId: state.callSessionId,
+        knownCustomer: state.knownCustomer
       });
       if (output.ok) state.finalized = true;
     } else if (call.name === "transfer_to_owner") {
@@ -1918,7 +2131,9 @@ async function handleToolCall({ call, state, openaiWs, twilioWs }) {
 
 async function configureRealtimeSession(openaiWs, state) {
   const context = await getBusinessContext(state.businessId);
+  const knownCustomer = await getKnownCustomerForCall({ callSessionId: state.callSessionId, supabase: context.supabase });
   state.business = context.business;
+  state.knownCustomer = knownCustomer;
   state.owner = context.owner;
   const serviceOptions = businessServiceOptions(context.business);
 
@@ -1928,7 +2143,7 @@ async function configureRealtimeSession(openaiWs, state) {
       type: "realtime",
       model: OPENAI_MODEL,
       output_modalities: ["audio"],
-      instructions: sessionInstructions(context),
+      instructions: sessionInstructions({ ...context, knownCustomer }),
       audio: {
         input: {
           format: {
@@ -1961,6 +2176,7 @@ function handleTwilioConnection(twilioWs) {
     fromPhone: null,
     greeted: false,
     hangupTimer: null,
+    knownCustomer: null,
     openaiReady: false,
     pendingHangup: false,
     realtimeFailed: false,
@@ -1999,10 +2215,19 @@ function handleTwilioConnection(twilioWs) {
 
     if (event.type === "session.updated" && !state.greeted) {
       state.greeted = true;
+      const customerName = String(state.knownCustomer?.full_name || "").trim();
+      const firstName = customerName.split(/\s+/)[0];
+      const savedAddress = normalizeAddressForStorage(state.knownCustomer?.address);
+      const greetingInstructions =
+        state.knownCustomer?.id && savedAddress
+          ? `Greet ${firstName || "the caller"} warmly as a returning customer for ${agentName(state.business)} with ${state.business?.name || "the business"}. Use an upbeat, human tone. Ask how they are, then say something like: "Are we still helping out at ${savedAddress}, or is it a different spot today?" Keep it under three short sentences.`
+          : state.knownCustomer?.id
+            ? `Greet ${firstName || "the caller"} warmly as a returning customer for ${agentName(state.business)} with ${state.business?.name || "the business"}. Ask how they are and what they need today. Keep it under two sentences.`
+            : `Greet the caller as ${agentName(state.business)} with ${state.business?.name || "the business"}. Ask how they are today, then ask if they have used the service before. Keep it under two sentences.`;
       sendJson(openaiWs, {
         type: "response.create",
         response: {
-          instructions: `Greet the caller as ${agentName(state.business)} with ${state.business?.name || "the business"}. Ask how they are today, then ask if they have used the service before. Keep it under two sentences.`
+          instructions: greetingInstructions
         }
       });
       return;

@@ -17,6 +17,7 @@ import { CalendarIcon, DollarIcon, MessageIcon, UsersIcon } from "@/components/u
 import { EyeIcon, PencilIcon, TrashIcon } from "@/components/ui/icons";
 import { AddressLookupInput } from "@/components/ui/address-lookup-input";
 import { StatusPill } from "@/components/ui/status-pill";
+import { aiCallPlanOptions, normalizeAiCallPlan } from "@/lib/call-usage";
 import { formatCurrency } from "@/lib/format";
 import { serviceOptions, type ServiceOption } from "@/lib/services";
 import type { AdminAccount, AdminPortalData } from "@/lib/admin-data";
@@ -200,6 +201,23 @@ function formatDateOnly(value: string | null | undefined, fallback = "Not set") 
 function formatClosureRange(startsOn: string, endsOn: string) {
   if (startsOn === endsOn) return formatDateOnly(startsOn);
   return `${formatDateOnly(startsOn)} - ${formatDateOnly(endsOn)}`;
+}
+
+function formatMinutes(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: value < 10 && value % 1 !== 0 ? 1 : 0,
+    minimumFractionDigits: 0
+  }).format(value);
+}
+
+function overageLabel(account: AdminAccount) {
+  const usage = account.aiCallUsage;
+
+  if (!usage.overageRatePerMinute) {
+    return usage.overageMinutes > 0 ? `${formatMinutes(usage.overageMinutes)} min over allowance` : "No overage billing";
+  }
+
+  return `${formatMinutes(usage.billableOverageMinutes)} min · ${formatCurrency(usage.overageAmount)}`;
 }
 
 function parseBusinessHours(value?: string | null): { days: BusinessDay[]; endTime: string; startTime: string } {
@@ -445,7 +463,12 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
                 <td>
                   <StatusPill status={account.status} />
                 </td>
-                <td>{billing?.plan_name ?? "Growth"}</td>
+                <td>
+                  <div>{normalizeAiCallPlan(billing?.plan_name).label}</div>
+                  <div className="meta">
+                    {formatMinutes(account.aiCallUsage.usedMinutes)} / {formatMinutes(account.aiCallUsage.allowanceMinutes)} min
+                  </div>
+                </td>
                 <td>{billing?.billing_status ?? "not set"}</td>
                 <td>
                   {onAction ? (
@@ -979,6 +1002,7 @@ function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => v
                 <th>Trade</th>
                 <th>Status</th>
                 <th>Billing</th>
+                <th>AI minutes</th>
                 <th>Readiness</th>
                 <th>Actions</th>
               </tr>
@@ -1006,6 +1030,12 @@ function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => v
                     <td>
                       <div>{billing?.billing_status ?? "not set"}</div>
                       <div className="meta">{formatCurrency(billing?.monthly_price ?? 0)}</div>
+                    </td>
+                    <td>
+                      <div>
+                        {formatMinutes(account.aiCallUsage.usedMinutes)} / {formatMinutes(account.aiCallUsage.allowanceMinutes)}
+                      </div>
+                      <div className="meta">{formatMinutes(account.aiCallUsage.remainingMinutes)} remaining</div>
                     </td>
                     <td>{readiness.label}</td>
                     <td>
@@ -1090,6 +1120,12 @@ function AccountDetailsModal({
     { label: "Routing number", value: account.twilio_routing_phone ?? "Not set" },
     { label: "Owner transfer", value: account.owner_transfer_phone ?? "Not set" },
     { label: "Billing", value: `${billing?.billing_status ?? "not set"} · ${formatCurrency(billing?.monthly_price ?? 0)}` },
+    {
+      label: "AI minutes",
+      value: `${formatMinutes(account.aiCallUsage.usedMinutes)} used / ${formatMinutes(account.aiCallUsage.allowanceMinutes)} included`
+    },
+    { label: "Remaining minutes", value: `${formatMinutes(account.aiCallUsage.remainingMinutes)} this month` },
+    { label: "Overage", value: overageLabel(account) },
     { label: "Readiness", value: readiness.label },
     { label: "Closed dates", value: closures.length ? closures.map((closure) => formatClosureRange(closure.starts_on, closure.ends_on)).join(", ") : "None", full: true }
   ];
@@ -1335,8 +1371,14 @@ function EditAccountModal({
             </select>
           </label>
           <label className="field">
-            <span>Plan name</span>
-            <input defaultValue={billing?.plan_name ?? "Growth"} maxLength={80} name="planName" required />
+            <span>AI call plan</span>
+            <select defaultValue={normalizeAiCallPlan(billing?.plan_name).label} name="planName">
+              {aiCallPlanOptions.map((plan) => (
+                <option key={plan.key} value={plan.label}>
+                  {plan.label} · {formatMinutes(plan.allowanceMinutes)} min/month
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>Monthly price</span>
@@ -1668,20 +1710,67 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
 }
 
 function Usage({ data }: { data: AdminPortalData }) {
+  const totalUsedMinutes = data.accounts.reduce((sum, account) => sum + account.aiCallUsage.usedMinutes, 0);
+  const totalIncludedMinutes = data.accounts.reduce((sum, account) => sum + account.aiCallUsage.allowanceMinutes, 0);
+  const totalOverageAmount = data.accounts.reduce((sum, account) => sum + account.aiCallUsage.overageAmount, 0);
+
   return (
-    <div className="grid three-col">
-      {data.accounts.map((account) => {
-        const billing = account.manual_billing_accounts?.[0];
-        return (
-          <article className="card" key={account.id}>
-            <h2>{account.name}</h2>
-            <div className="meta">Plan: {billing?.plan_name ?? "Growth"}</div>
-            <div className="meta">Monthly price: {formatCurrency(billing?.monthly_price ?? 149)}</div>
-            <div className="stat-value">70%+</div>
-            <div className="stat-foot">Target gross margin</div>
-          </article>
-        );
-      })}
+    <div className="grid">
+      <div className="grid stats-grid">
+        <Stat featured label="Used minutes" value={formatMinutes(totalUsedMinutes)} foot={data.accounts[0]?.aiCallUsage.monthLabel ?? "Current month"} icon={<MessageIcon />} />
+        <Stat label="Included minutes" value={formatMinutes(totalIncludedMinutes)} foot="Across all accounts" icon={<CalendarIcon />} />
+        <Stat label="VIP overage" value={formatCurrency(totalOverageAmount)} foot="$0.05/min after 600" icon={<DollarIcon />} />
+        <Stat label="Accounts" value={data.accounts.length} foot="Tracked customers" icon={<UsersIcon />} />
+      </div>
+      <section className="card">
+        <div className="section-card-header">
+          <div>
+            <h2>AI Call Minutes</h2>
+            <p className="meta">Current-month customer call minutes from Twilio status events.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Business</th>
+                <th>Plan</th>
+                <th>Used</th>
+                <th>Remaining</th>
+                <th>Overage</th>
+                <th>Month</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.accounts.map((account) => {
+                const usage = account.aiCallUsage;
+
+                return (
+                  <tr key={account.id}>
+                    <td>
+                      <strong>{account.name}</strong>
+                      <div className="meta">{account.owners[0]?.email ?? account.owners[0]?.phone ?? "No owner contact"}</div>
+                    </td>
+                    <td>
+                      <div>{usage.planName}</div>
+                      <div className="meta">{formatMinutes(usage.allowanceMinutes)} included</div>
+                    </td>
+                    <td>
+                      <div>{formatMinutes(usage.usedMinutes)} min</div>
+                      <div className="usage-meter" aria-label={`${usage.usagePercent.toFixed(0)} percent used`}>
+                        <span style={{ width: `${usage.usagePercent}%` }} />
+                      </div>
+                    </td>
+                    <td>{formatMinutes(usage.remainingMinutes)} min</td>
+                    <td>{overageLabel(account)}</td>
+                    <td>{usage.monthLabel}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

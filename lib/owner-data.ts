@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildAiCallUsage, sumUsageMinutes } from "@/lib/call-usage";
 import { createClient } from "@/lib/supabase/server";
 import { todayRange } from "@/lib/format";
+import { ownerSummaryLanguage, ownerTranslationConfigured, tryTranslateOwnerText } from "@/lib/summary-translation";
 import type {
   AiSummary,
+  AiCallUsage,
   Business,
   BusinessAvailabilityException,
   CallSession,
@@ -36,6 +39,7 @@ export type OwnerPortalData = {
   radiusRule: ServiceRadiusRule | null;
   availabilityExceptions: BusinessAvailabilityException[];
   billing: ManualBillingAccount | null;
+  aiCallUsage: AiCallUsage;
   jobs: Job[];
   customers: Customer[];
   quotes: Quote[];
@@ -62,106 +66,6 @@ type SummaryTranslationRow = {
   language: OwnerDisplayLanguage;
   summary: string;
 };
-
-const SUMMARY_TRANSLATION_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-5-nano";
-
-function ownerSummaryLanguage(language?: string | null): OwnerDisplayLanguage {
-  return String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
-}
-
-function responseOutputText(payload: unknown) {
-  if (typeof payload !== "object" || payload === null) return "";
-  const response = payload as { output?: Array<{ content?: Array<{ text?: string; type?: string }> }>; output_text?: string };
-  if (typeof response.output_text === "string") return response.output_text.trim();
-
-  return (response.output || [])
-    .flatMap((item) => item.content || [])
-    .filter((part) => part.type === "output_text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("")
-    .trim();
-}
-
-function parseJsonArray(value: string) {
-  const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const raw = fenced || value;
-  const start = raw.indexOf("[");
-  const end = raw.lastIndexOf("]");
-  if (start === -1 || end === -1 || end <= start) return [];
-
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-async function translateSummaryBatch(summaries: AiSummary[], language: OwnerDisplayLanguage) {
-  if (!summaries.length || !process.env.OPENAI_API_KEY) return new Map<string, SummaryTranslation>();
-
-  const targetLanguage = language === "es" ? "Spanish as used in the United States" : "English";
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    body: JSON.stringify({
-      input: [
-        {
-          content: [
-            {
-              type: "input_text",
-              text: [
-                `Translate these owner-facing business summaries into ${targetLanguage}.`,
-                "Return only a JSON array. Each item must have id, summary, and action_needed.",
-                "Translate all normal human-readable text.",
-                "Preserve names, phone numbers, email addresses, URLs, dates, times, prices, service labels, and physical addresses exactly.",
-                "Do not add facts. Do not remove facts. Keep each translation concise.",
-                JSON.stringify(
-                  summaries.map((summary) => ({
-                    action_needed: summary.action_needed,
-                    id: summary.id,
-                    summary: summary.summary
-                  }))
-                )
-              ].join("\n")
-            }
-          ],
-          role: "user"
-        }
-      ],
-      max_output_tokens: 1800,
-      model: SUMMARY_TRANSLATION_MODEL,
-      store: false
-    }),
-    headers: {
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: { message?: string }; message?: string };
-    console.error("Could not translate owner summaries:", payload.error?.message || payload.message || response.status);
-    return new Map<string, SummaryTranslation>();
-  }
-
-  const payload = await response.json().catch(() => ({}));
-  const rows = parseJsonArray(responseOutputText(payload));
-  const translations = new Map<string, SummaryTranslation>();
-
-  for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
-    const item = row as { action_needed?: unknown; id?: unknown; summary?: unknown };
-    const id = typeof item.id === "string" ? item.id : "";
-    const summary = typeof item.summary === "string" ? item.summary.trim() : "";
-    if (!id || !summary) continue;
-    translations.set(id, {
-      display_action_needed: typeof item.action_needed === "string" ? item.action_needed.trim() : null,
-      display_summary: summary
-    });
-  }
-
-  return translations;
-}
 
 async function cachedSummaryTranslations({
   businessId,
@@ -199,31 +103,45 @@ async function cachedSummaryTranslations({
   return translations;
 }
 
-async function cacheSummaryTranslations({
+async function createSummaryTranslation({
   businessId,
   language,
-  translations,
+  summary,
   supabase
 }: {
   businessId: string;
   language: OwnerDisplayLanguage;
-  translations: Map<string, SummaryTranslation>;
+  summary: AiSummary;
   supabase: SupabaseClient;
 }) {
-  const rows = [...translations.entries()]
-    .filter(([, translation]) => Boolean(translation.display_summary))
-    .map(([summaryId, translation]) => ({
-      action_needed: translation.display_action_needed ?? null,
-      ai_summary_id: summaryId,
+  if (!ownerTranslationConfigured()) return null;
+
+  const [translatedSummary, translatedAction] = await Promise.all([
+    tryTranslateOwnerText({ kind: "summary", language, text: summary.summary }),
+    summary.action_needed ? tryTranslateOwnerText({ kind: "action item", language, text: summary.action_needed }) : Promise.resolve(null)
+  ]);
+
+  if (!translatedSummary) return null;
+
+  const { error } = await supabase.from("ai_summary_translations").upsert(
+    {
+      action_needed: translatedAction,
+      ai_summary_id: summary.id,
       business_id: businessId,
       language,
-      summary: translation.display_summary as string
-    }));
+      summary: translatedSummary
+    },
+    { onConflict: "ai_summary_id,language" }
+  );
 
-  if (!rows.length) return;
+  if (error) {
+    console.error("Could not cache summary translation:", error.message);
+  }
 
-  const { error } = await supabase.from("ai_summary_translations").upsert(rows, { onConflict: "ai_summary_id,language" });
-  if (error) console.error("Could not cache summary translations:", error.message);
+  return {
+    display_action_needed: translatedAction,
+    display_summary: translatedSummary
+  };
 }
 
 async function localizeSummaries({
@@ -255,22 +173,19 @@ async function localizeSummaries({
     if (translated?.display_summary) {
       summary.display_summary = translated.display_summary;
       summary.display_action_needed = translated.display_action_needed ?? null;
+      continue;
     }
-  }
 
-  const missingTranslations = needsTranslation.filter((summary) => !cached.has(summary.id));
+    const generated = await createSummaryTranslation({
+      businessId,
+      language,
+      summary,
+      supabase
+    });
 
-  for (let index = 0; index < missingTranslations.length; index += 12) {
-    const batch = missingTranslations.slice(index, index + 12);
-    const translations = await translateSummaryBatch(batch, language);
-    await cacheSummaryTranslations({ businessId, language, supabase, translations });
-
-    for (const summary of batch) {
-      const translated = translations.get(summary.id);
-      if (translated?.display_summary) {
-        summary.display_summary = translated.display_summary;
-        summary.display_action_needed = translated.display_action_needed ?? null;
-      }
+    if (generated?.display_summary) {
+      summary.display_summary = generated.display_summary;
+      summary.display_action_needed = generated.display_action_needed ?? null;
     }
   }
 
@@ -323,7 +238,8 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     messagesResult,
     callsResult,
     summariesResult,
-    remindersResult
+    remindersResult,
+    usageResult
   ] = await Promise.all([
     supabase.from("businesses").select("*").eq("id", businessId).single<Business>(),
     supabase.from("service_radius_rules").select("*").eq("business_id", businessId).maybeSingle<ServiceRadiusRule>(),
@@ -373,7 +289,15 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
       .eq("status", "due")
       .lte("due_at", reminderDueDate)
       .order("due_at", { ascending: true })
-      .limit(50)
+      .limit(50),
+    supabase
+      .from("usage_events")
+      .select("quantity")
+      .eq("business_id", businessId)
+      .eq("event_type", "qualified_business_voice")
+      .eq("unit", "minute")
+      .gte("occurred_at", monthStart.toISOString())
+      .lt("occurred_at", nextMonthStart.toISOString())
   ]);
 
   if (!businessResult.data) redirect("/owner/no-business");
@@ -382,6 +306,12 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
   const customers = (customersResult.data ?? []) as Customer[];
   const quotes = (quotesResult.data ?? []) as Quote[];
   const calls = (callsResult.data ?? []) as CallSession[];
+  const billing = billingResult.data ?? null;
+  const aiCallUsage = buildAiCallUsage({
+    planName: billing?.plan_name,
+    referenceDate: requestTime,
+    usedMinutes: sumUsageMinutes((usageResult.data ?? []) as Array<{ quantity: number | string | null }>)
+  });
   const customerIds = customers.map((customer) => customer.id);
   const customerServices: Record<string, string> = {};
   const customerLastServiceAt: Record<string, string> = {};
@@ -462,7 +392,8 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     business: businessResult.data,
     radiusRule: radiusResult.data ?? null,
     availabilityExceptions: (availabilityExceptionsResult.data ?? []) as BusinessAvailabilityException[],
-    billing: billingResult.data ?? null,
+    billing,
+    aiCallUsage,
     jobs,
     customers,
     quotes,

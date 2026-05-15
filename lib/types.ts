@@ -81,6 +81,8 @@ export type ManualBillingAccount = {
   payment_method_note: string | null;
 };
 
+export type { AiCallUsage } from "@/lib/call-usage";
+
 export type Customer = {
   id: string;
   business_id: string;
