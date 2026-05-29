@@ -65,9 +65,10 @@ export async function tryTranslateOwnerText({ kind = "summary", language, text }
               {
                 type: "input_text",
                 text:
-                  `Rewrite this owner-facing ${kind} in clear ${target}. ` +
+                  `Rewrite this owner-facing ${kind} in clear ${target}. Use a professional business summary style: short outcome sentence, customer details, request details, missing information, and recommended owner action. ` +
                   "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
-                  "Do not add facts. Return only the rewritten text."
+                  "Do not add facts. Do not include internal/debug phrases like tool call failed, realtime created, saved lead because, or owner approval SMS was not sent. " +
+                  "Convert internal states into owner-friendly wording such as Needs owner approval, New lead created, Name not collected, Address missing, or Call ended before Ana collected all details. Return only the rewritten text."
               }
             ],
             role: "developer"

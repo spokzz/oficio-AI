@@ -194,7 +194,9 @@ export type CallSession = {
   ended_at: string | null;
   outcome: string | null;
   transcript: string | null;
+  job_id?: string | null;
   customers?: Pick<Customer, "full_name" | "phone"> | null;
+  jobs?: Pick<Job, "address" | "scheduled_start" | "service_type" | "status"> | null;
 };
 
 export type AiSummary = {
@@ -205,6 +207,7 @@ export type AiSummary = {
   summary_language: string;
   summary: string;
   display_summary?: string;
+  display_translation_pending?: boolean;
   action_needed: string | null;
   display_action_needed?: string | null;
   confidence: number | null;

@@ -829,7 +829,7 @@ function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
               <span>Owner summary language</span>
               <select defaultValue="en" name="ownerSummaryLanguage">
                 <option value="en">English</option>
-                <option value="es">Spanish</option>
+	                <option value="es">Español</option>
               </select>
             </label>
             <label className="field">
@@ -1360,7 +1360,7 @@ function EditAccountModal({
             <span>Owner summary language</span>
             <select defaultValue={account.owner_summary_language ?? "en"} name="ownerSummaryLanguage">
               <option value="en">English</option>
-              <option value="es">Spanish</option>
+	              <option value="es">Español</option>
             </select>
           </label>
           <label className="field">
@@ -1656,7 +1656,7 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
             <span>Owner summary language</span>
             <select defaultValue={account.owner_summary_language ?? "en"} name="ownerSummaryLanguage">
               <option value="en">English</option>
-              <option value="es">Spanish</option>
+	              <option value="es">Español</option>
             </select>
           </label>
           <label className="field">

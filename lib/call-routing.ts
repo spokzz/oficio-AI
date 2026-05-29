@@ -166,7 +166,7 @@ export async function ensurePhoneCustomer({
 
   if (existing?.id) return existing.id;
 
-  const fullName = displayName?.trim() || `Caller ${phone}`;
+  const fullName = displayName?.trim() || "Phone caller";
   const { data: customer, error } = await supabase
     .from("customers")
     .insert({

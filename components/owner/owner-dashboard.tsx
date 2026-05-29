@@ -189,7 +189,7 @@ const copy = {
     declineOutsideRadius: "Ana rechaza automáticamente",
     allowOutsideRadius: "Permitir con aprobación del dueño",
     serviceAreaSaved: "Área de servicio guardada.",
-    summaryLanguage: "Idioma de resumen",
+    summaryLanguage: "Idioma de resumen del dueño",
     summaryMethod: "Método de resumen",
     summaryMethodSms: "Texto SMS",
     summaryMethodEmail: "Email",
@@ -255,6 +255,19 @@ const copy = {
     anaCallLog: "Llamadas con Ana",
     anaCallLogSubtitle: "Cada llamada muestra el teléfono, nombre cuando Ana lo obtiene y un resumen claro.",
     callSummary: "Resumen de la llamada",
+    serviceRequested: "Servicio solicitado",
+    requestedTime: "Fecha solicitada",
+    ownerAction: "Acción del dueño",
+    notCollected: "No recopilado",
+    translationPending: "Traducción en preparación. Se muestra el resumen disponible.",
+    callStatuses: {
+      booked: "Reservado",
+      existing_customer: "Cliente existente",
+      incomplete: "Incompleta",
+      needs_approval: "Necesita aprobación",
+      needs_callback: "Necesita llamada",
+      new_lead: "Cliente potencial"
+    },
     noCalls: "No hay llamadas con Ana todavía.",
     caller: "Persona",
     phoneNumber: "Teléfono",
@@ -448,7 +461,7 @@ const copy = {
     declineOutsideRadius: "Ana declines automatically",
     allowOutsideRadius: "Allow with owner approval",
     serviceAreaSaved: "Service area saved.",
-    summaryLanguage: "Summary language",
+    summaryLanguage: "Owner summary language",
     summaryMethod: "Summary method",
     summaryMethodSms: "SMS text",
     summaryMethodEmail: "Email",
@@ -514,6 +527,19 @@ const copy = {
     anaCallLog: "Ana call log",
     anaCallLogSubtitle: "Every call shows the phone number, name when Ana gets one, and a clear summary.",
     callSummary: "Call summary",
+    serviceRequested: "Service requested",
+    requestedTime: "Requested time",
+    ownerAction: "Owner action",
+    notCollected: "Not collected",
+    translationPending: "Translation is being prepared. Showing the available summary.",
+    callStatuses: {
+      booked: "Booked",
+      existing_customer: "Existing customer",
+      incomplete: "Incomplete",
+      needs_approval: "Needs approval",
+      needs_callback: "Needs callback",
+      new_lead: "New lead"
+    },
     noCalls: "No Ana calls yet.",
     caller: "Caller",
     phoneNumber: "Phone",
@@ -731,13 +757,37 @@ function mentionedCallerName(transcript?: string | null) {
   return name;
 }
 
+function summaryForCall(call: OwnerPortalData["calls"][number], summaries: OwnerPortalData["summaries"]) {
+  return summaries.find((item) => item.call_session_id === call.id);
+}
+
 function callSummary(call: OwnerPortalData["calls"][number], summaries: OwnerPortalData["summaries"], labels: OwnerCopy) {
-  const summary = summaries.find((item) => item.call_session_id === call.id);
+  const summary = summaryForCall(call, summaries);
   return summary?.display_summary || summary?.summary || call.outcome || labels.noAiObservations;
 }
 
 function callCallerName(call: OwnerPortalData["calls"][number], labels: OwnerCopy) {
-  return call.customers?.full_name || mentionedCallerName(call.transcript) || labels.newCustomer;
+  const name = call.customers?.full_name || mentionedCallerName(call.transcript);
+  return name && name !== "Phone caller" ? name : labels.notCollected;
+}
+
+function callBusinessStatus(call: OwnerPortalData["calls"][number], labels: OwnerCopy) {
+  const statuses: Record<string, string> = labels.callStatuses;
+  if (call.jobs?.status === "confirmed") return statuses.booked;
+  if (call.needs_owner_review || call.jobs?.status === "pending") return statuses.needs_approval;
+  if (call.jobs?.status === "lead") return statuses.new_lead;
+  if (call.status === "transferred") return statuses.needs_callback;
+  if (!call.customer_id && !call.job_id) return statuses.incomplete;
+  if (call.contact_type === "customer") return statuses.existing_customer;
+  return statusLabel(labels, call.status);
+}
+
+function callOwnerAction(call: OwnerPortalData["calls"][number], labels: OwnerCopy) {
+  const status = callBusinessStatus(call, labels);
+  if (status === labels.callStatuses.needs_approval) return labels.callStatuses.needs_approval;
+  if (status === labels.callStatuses.new_lead) return labels.review;
+  if (status === labels.callStatuses.incomplete || status === labels.callStatuses.needs_callback) return labels.callStatuses.needs_callback;
+  return labels.notCollected;
 }
 
 function serviceFeeLabel(fee?: number | null) {
@@ -2381,8 +2431,13 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
         <div className="call-log-list">
           {data.calls.length ? (
             data.calls.map((call) => {
+              const summaryRecord = summaryForCall(call, data.summaries);
               const summary = callSummary(call, data.summaries, labels);
               const mentionedName = mentionedCallerName(call.transcript);
+              const service = call.jobs?.service_type ? serviceLabel(labels, call.jobs.service_type) : labels.notCollected;
+              const requestedTime = call.jobs?.scheduled_start ? formatDateTime(call.jobs.scheduled_start) : labels.notCollected;
+              const address = call.jobs?.address || labels.notCollected;
+              const ownerAction = summaryRecord?.display_action_needed ?? summaryRecord?.action_needed ?? callOwnerAction(call, labels);
 
               return (
                 <article className="call-log-card" key={call.id}>
@@ -2391,16 +2446,32 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
                       <strong>{callCallerName(call, labels)}</strong>
                       <span>{formatDateTime(call.started_at)}</span>
                     </div>
-                    <span className="pill info">{statusLabel(labels, call.status)}</span>
+                    <span className="pill info">{callBusinessStatus(call, labels)}</span>
                   </div>
                   <div className="call-meta-grid">
                     <div>
                       <span>{labels.phoneNumber}</span>
-                      <strong>{formatPhone(call.from_phone ?? call.customers?.phone) ?? labels.notSet}</strong>
+                      <strong>{formatPhone(call.from_phone ?? call.customers?.phone) ?? labels.notCollected}</strong>
                     </div>
                     <div>
                       <span>{labels.caller}</span>
-                      <strong>{customerName(call.customers, labels.newCustomer)}</strong>
+                      <strong>{callCallerName(call, labels)}</strong>
+                    </div>
+                    <div>
+                      <span>{labels.serviceRequested}</span>
+                      <strong>{service}</strong>
+                    </div>
+                    <div>
+                      <span>{labels.requestedTime}</span>
+                      <strong>{requestedTime}</strong>
+                    </div>
+                    <div>
+                      <span>{labels.address}</span>
+                      <strong>{address}</strong>
+                    </div>
+                    <div>
+                      <span>{labels.ownerAction}</span>
+                      <strong>{ownerAction}</strong>
                     </div>
                     {mentionedName && !call.customers?.full_name ? (
                       <div>
@@ -2412,6 +2483,7 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
                   <div className="call-summary-panel">
                     <span>{labels.callSummary}</span>
                     <p>{compactPreview(summary, 420)}</p>
+                    {summaryRecord?.display_translation_pending ? <small className="meta">{labels.translationPending}</small> : null}
                   </div>
                 </article>
               );

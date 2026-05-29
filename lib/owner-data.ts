@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildAiCallUsage, sumUsageMinutes } from "@/lib/call-usage";
 import { createClient } from "@/lib/supabase/server";
 import { todayRange } from "@/lib/format";
-import { ownerSummaryLanguage, ownerTranslationConfigured, tryTranslateOwnerText } from "@/lib/summary-translation";
+import { ownerSummaryLanguage } from "@/lib/summary-translation";
 import type {
   AiSummary,
   AiCallUsage,
@@ -103,47 +103,6 @@ async function cachedSummaryTranslations({
   return translations;
 }
 
-async function createSummaryTranslation({
-  businessId,
-  language,
-  summary,
-  supabase
-}: {
-  businessId: string;
-  language: OwnerDisplayLanguage;
-  summary: AiSummary;
-  supabase: SupabaseClient;
-}) {
-  if (!ownerTranslationConfigured()) return null;
-
-  const [translatedSummary, translatedAction] = await Promise.all([
-    tryTranslateOwnerText({ kind: "summary", language, text: summary.summary }),
-    summary.action_needed ? tryTranslateOwnerText({ kind: "action item", language, text: summary.action_needed }) : Promise.resolve(null)
-  ]);
-
-  if (!translatedSummary) return null;
-
-  const { error } = await supabase.from("ai_summary_translations").upsert(
-    {
-      action_needed: translatedAction,
-      ai_summary_id: summary.id,
-      business_id: businessId,
-      language,
-      summary: translatedSummary
-    },
-    { onConflict: "ai_summary_id,language" }
-  );
-
-  if (error) {
-    console.error("Could not cache summary translation:", error.message);
-  }
-
-  return {
-    display_action_needed: translatedAction,
-    display_summary: translatedSummary
-  };
-}
-
 async function localizeSummaries({
   businessId,
   language,
@@ -173,19 +132,8 @@ async function localizeSummaries({
     if (translated?.display_summary) {
       summary.display_summary = translated.display_summary;
       summary.display_action_needed = translated.display_action_needed ?? null;
-      continue;
-    }
-
-    const generated = await createSummaryTranslation({
-      businessId,
-      language,
-      summary,
-      supabase
-    });
-
-    if (generated?.display_summary) {
-      summary.display_summary = generated.display_summary;
-      summary.display_action_needed = generated.display_action_needed ?? null;
+    } else {
+      summary.display_translation_pending = true;
     }
   }
 
@@ -272,7 +220,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
       .limit(8),
     supabase
       .from("call_sessions")
-      .select("*, customers(full_name, phone)")
+      .select("*, customers(full_name, phone), jobs(service_type, status, scheduled_start, address)")
       .eq("business_id", businessId)
       .order("started_at", { ascending: false })
       .limit(500),
@@ -379,9 +327,10 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
     pendingQuotes: quotes.filter((quote) => quote.status === "needs_owner_approval" || quote.status === "draft").length
   };
 
+  const summaryDisplayLanguage = ownerSummaryLanguage(businessResult.data.owner_summary_language);
   const summaries = await localizeSummaries({
     businessId,
-    language: displayLanguage,
+    language: summaryDisplayLanguage,
     summaries: (summariesResult.data ?? []) as AiSummary[],
     supabase
   });

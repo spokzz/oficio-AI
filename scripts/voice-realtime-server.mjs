@@ -2,6 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import { createClient } from "@supabase/supabase-js";
 import WebSocket, { WebSocketServer } from "ws";
+import { createActiveVoiceCallRegistry } from "../shared/active-voice-call-registry.js";
 
 function loadEnvFile(path) {
   if (!fs.existsSync(path)) return;
@@ -56,6 +57,8 @@ const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const BUSINESS_HOURS_TEXT =
   process.env.OFICIO_BUSINESS_HOURS_TEXT ||
   `Monday through Friday, ${String(WORKDAY_START_HOUR)}:00 AM to ${WORKDAY_END_HOUR > 12 ? WORKDAY_END_HOUR - 12 : WORKDAY_END_HOUR}:00 PM`;
+const activeVoiceCalls = createActiveVoiceCallRegistry();
+const { activeCallsByCallSid, activeCallsByStreamSid } = activeVoiceCalls;
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -292,41 +295,125 @@ function ownerServiceLabel(serviceType, language = "en") {
   return labels[serviceType] || serviceLabel(serviceType || "servicio");
 }
 
-function friendlyLeadSummary({ address, customerName, details, language, scheduledFor, serviceType }) {
-  const name = customerName || (language === "es" ? "un cliente nuevo" : "a new customer");
+function compactTextLine(value, maxLength = 180) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > maxLength ? text.slice(0, maxLength).replace(/\s+\S*$/, "").trim() : text;
+}
+
+function ownerMissingValue(language) {
+  return language === "es" ? "No recopilado" : "Not collected";
+}
+
+function ownerMissingList(items, language) {
+  const missing = items.filter(Boolean);
+  if (!missing.length) return language === "es" ? "Ninguna informacion clave pendiente" : "No key information missing";
+  return missing.join(", ");
+}
+
+function friendlyLeadSummary({ address, customerName, customerPhone, details, language, scheduledFor, serviceType }) {
+  const name = customerName || ownerMissingValue(language);
+  const phone = customerPhone || ownerMissingValue(language);
   const service = ownerServiceLabel(serviceType, language);
-  const location = address ? (language === "es" ? ` en ${address}` : ` at ${address}`) : "";
-  const timing = scheduledFor ? (language === "es" ? ` para ${scheduledFor}` : ` on ${scheduledFor}`) : "";
-  const note = compactCallText(details, 220);
+  const location = address || ownerMissingValue(language);
+  const timing = scheduledFor || ownerMissingValue(language);
+  const missingInfo = ownerMissingList(
+    [
+      customerName ? null : language === "es" ? "nombre" : "name",
+      address ? null : language === "es" ? "direccion" : "address",
+      scheduledFor ? null : language === "es" ? "fecha/hora solicitada" : "requested date/time"
+    ],
+    language
+  );
+  const note = compactTextLine(details, 220);
 
   if (language === "es") {
-    return [`Nuevo cliente potencial: ${name}${location}.`, `Quiere ${service}${timing}.`, note ? `Notas de Ana: ${note}` : ""]
+    return [
+      `Nuevo cliente potencial para ${service}.`,
+      `Cliente: ${name}. Telefono: ${phone}.`,
+      `Solicitud: ${service}${timing !== ownerMissingValue(language) ? ` para ${timing}` : ""}. Direccion: ${location}.`,
+      `Informacion faltante: ${missingInfo}.`,
+      note ? `Notas: ${note}.` : "",
+      "Accion necesaria: revisar el lead y contactar al cliente si falta informacion o si requiere aprobacion."
+    ]
       .filter(Boolean)
       .join(" ");
   }
 
-  return [`New lead from ${name}${location}.`, `They want ${service}${timing}.`, note ? `Ana notes: ${note}` : ""]
+  return [
+    `New ${service} lead.`,
+    `Customer: ${name}. Phone: ${phone}.`,
+    `Request: ${service}${timing !== ownerMissingValue(language) ? ` for ${timing}` : ""}. Address: ${location}.`,
+    `Missing information: ${missingInfo}.`,
+    note ? `Notes: ${note}.` : "",
+    "Action needed: review the lead and contact the customer if information is missing or approval is needed."
+  ]
     .filter(Boolean)
     .join(" ");
 }
 
-function friendlyBookingSummary({ address, customerName, language, ownerApprovalSent, scheduledFor, serviceType }) {
-  const base = friendlyLeadSummary({
-    address,
-    customerName,
-    language,
-    scheduledFor,
-    serviceType
-  });
-  const next = ownerApprovalSent
-    ? language === "es"
-      ? "Ana envio la solicitud al dueno para aprobarla."
-      : "Ana sent it to the owner for approval."
-    : language === "es"
-      ? "Ana lo guardo como lead porque no pudo enviar la aprobacion por texto."
-      : "Ana saved it as a lead because the approval text could not be sent.";
+function friendlyBookingSummary({ address, customerName, customerPhone, language, ownerApprovalSent, scheduledFor, serviceType }) {
+  const service = ownerServiceLabel(serviceType, language);
+  const name = customerName || ownerMissingValue(language);
+  const phone = customerPhone || ownerMissingValue(language);
+  const location = address || ownerMissingValue(language);
+  const timing = scheduledFor || ownerMissingValue(language);
 
-  return `${base} ${next}`;
+  if (language === "es") {
+    return [
+      `${ownerApprovalSent ? "Nueva solicitud de cita" : "Nuevo cliente potencial"} para ${service}.`,
+      `Cliente: ${name}. Telefono: ${phone}.`,
+      `Solicitud: ${service} para ${timing}. Direccion: ${location}.`,
+      "Informacion faltante: Ninguna informacion clave pendiente.",
+      ownerApprovalSent
+        ? "Accion necesaria: revisar y aprobar la cita antes de confirmarla con el cliente."
+        : "Accion necesaria: revisar el lead y contactar al cliente para confirmar la cita."
+    ].join(" ");
+  }
+
+  return [
+    `${ownerApprovalSent ? "New appointment request" : "New lead"} for ${service}.`,
+    `Customer: ${name}. Phone: ${phone}.`,
+    `Request: ${service} for ${timing}. Address: ${location}.`,
+    "Missing information: No key information missing.",
+    ownerApprovalSent
+      ? "Action needed: review and approve the appointment before confirming with the customer."
+      : "Action needed: review the lead and contact the customer to confirm the appointment."
+  ].join(" ");
+}
+
+function ownerSummarySmsBody({ address, customerName, customerPhone, language, requestedFor, serviceType, status }) {
+  const service = ownerServiceLabel(serviceType || "service", language);
+  const phone = customerPhone || ownerMissingValue(language);
+  const name = customerName || ownerMissingValue(language);
+  const location = address || ownerMissingValue(language);
+  const requested = requestedFor || ownerMissingValue(language);
+
+  if (language === "es") {
+    return [
+      `Ana: ${status === "approval" ? "Nueva solicitud de cita" : "Nuevo cliente potencial"} para ${service}`,
+      "",
+      `Telefono: ${phone}`,
+      `Servicio: ${service}`,
+      `Fecha solicitada: ${requested}`,
+      `Nombre: ${name}`,
+      `Direccion: ${location}`,
+      "",
+      `Accion: ${status === "approval" ? "Revisar/aprobar antes de confirmar." : "Revisar y contactar al cliente si falta informacion."}`
+    ].join("\n");
+  }
+
+  return [
+    `Ana: ${status === "approval" ? "New appointment request" : "New lead"} for ${service}`,
+    "",
+    `Caller: ${phone}`,
+    `Service: ${service}`,
+    `Requested: ${requested}`,
+    `Name: ${name}`,
+    `Address: ${location}`,
+    "",
+    `Action: ${status === "approval" ? "Review/approve before confirming." : "Review and contact the customer if information is missing."}`
+  ].join("\n");
 }
 
 function agentName(business) {
@@ -421,6 +508,64 @@ function normalizeAddressForStorage(value) {
   return address.replace(/\bAcerne(\s+(?:St|Street)\b)/gi, "Acerno$1");
 }
 
+function digitsOnly(value) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function isLikelyPhoneOnly(value) {
+  const text = String(value ?? "");
+  const digits = digitsOnly(value);
+  if (digits.length < 7) return false;
+  if (/[A-Za-z]/.test(text)) return false;
+  return digits.length >= text.replace(/\s+/g, "").length - 3;
+}
+
+function isPlaceholderCustomerName(value, phone) {
+  const name = compactTextLine(value, 120);
+  if (!name) return true;
+
+  const phoneDigits = digitsOnly(phone);
+  const nameDigits = digitsOnly(name);
+  if (phoneDigits && nameDigits && (nameDigits === phoneDigits || phoneDigits.endsWith(nameDigits) || nameDigits.endsWith(phoneDigits))) {
+    return true;
+  }
+
+  return /^(?:phone caller|caller|unknown caller|unknown|customer|new customer|cliente|persona)(?:\s+\+?\d[\d\s().-]*)?$/i.test(name);
+}
+
+function cleanCustomerFullName(value, phone) {
+  const name = compactTextLine(value, 90).replace(/^[,.:;-]+|[,.:;-]+$/g, "");
+  if (!name || isPlaceholderCustomerName(name, phone) || isLikelyPhoneOnly(name)) return null;
+  if (!/[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(name)) return null;
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  return name;
+}
+
+function requireCustomerFullName({ args, existingCustomer, callerPhone }) {
+  const phone = args.customer_phone || existingCustomer?.phone || callerPhone;
+  const providedName = cleanCustomerFullName(args.customer_name, phone);
+  if (providedName) return providedName;
+
+  const existingName = cleanCustomerFullName(existingCustomer?.full_name, phone);
+  if (existingName) return existingName;
+
+  return null;
+}
+
+function isPlausibleServiceAddress(value) {
+  const address = normalizeAddressForStorage(value);
+  if (!address) return false;
+  if (isLikelyPhoneOnly(address)) return false;
+  if (!/\d/.test(address) || !/[A-Za-z]/.test(address)) return false;
+  if (/^(?:same|same address|my address|their address|customer address|unknown|n\/a|none)$/i.test(address)) return false;
+  return address.length >= 8;
+}
+
+function addressConfirmedValue(value) {
+  return value === true || String(value).toLowerCase() === "true";
+}
+
 async function sendTwilioSms({ body, to }) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -496,6 +641,7 @@ async function notifyOwnerSummary({
   businessId,
   callSessionId,
   customerId,
+  ownerMessageBody,
   ownerEmail,
   ownerPhone,
   summary,
@@ -507,20 +653,39 @@ async function notifyOwnerSummary({
   const localizedSummary = await rewriteOwnerText({ kind: "summary", language, text: summary });
   const action = actionNeeded ? await rewriteOwnerText({ kind: "action item", language, text: actionNeeded }) : null;
 
-  await supabase.from("ai_summaries").insert({
-    action_needed: action,
-    business_id: businessId,
-    call_session_id: callSessionId || null,
-    confidence: 0.9,
-    customer_id: customerId || null,
-    summary: localizedSummary,
-    summary_language: language
-  });
+  const { data: savedSummary, error: summaryError } = await supabase
+    .from("ai_summaries")
+    .insert({
+      action_needed: action,
+      business_id: businessId,
+      call_session_id: callSessionId || null,
+      confidence: 0.9,
+      customer_id: customerId || null,
+      summary: localizedSummary,
+      summary_language: language
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (summaryError) {
+    console.error("Could not create owner summary:", summaryError.message);
+  }
+
+  if (savedSummary?.id) {
+    await cacheOppositeOwnerSummaryTranslation({
+      actionNeeded: action,
+      businessId,
+      language,
+      summary: localizedSummary,
+      summaryId: savedSummary.id,
+      supabase
+    });
+  }
 
   const prefix = language === "es" ? "Resumen de Ana" : "Ana summary";
   const actionLine =
     action && language === "es" ? `\nAccion: ${action}` : action && language === "en" ? `\nAction: ${action}` : "";
-  const body = `${prefix}: ${localizedSummary}${actionLine}`;
+  const body = ownerMessageBody || `${prefix}: ${localizedSummary}${actionLine}`;
 
   if (summaryChannel === "email") {
     const email = await sendOwnerEmail({
@@ -538,6 +703,38 @@ async function notifyOwnerSummary({
   const sms = await sendTwilioSms({ body, to: ownerPhone });
 
   return { ok: true, sms };
+}
+
+function oppositeOwnerLanguage(language) {
+  return ownerSummaryLanguage(language) === "es" ? "en" : "es";
+}
+
+async function cacheOppositeOwnerSummaryTranslation({ actionNeeded, businessId, language, summary, summaryId, supabase }) {
+  const targetLanguage = oppositeOwnerLanguage(language);
+
+  try {
+    const [translatedSummary, translatedAction] = await Promise.all([
+      rewriteOwnerText({ kind: "summary", language: targetLanguage, text: summary }),
+      actionNeeded ? rewriteOwnerText({ kind: "action item", language: targetLanguage, text: actionNeeded }) : Promise.resolve(null)
+    ]);
+
+    if (!translatedSummary || translatedSummary === summary) return;
+
+    const { error } = await supabase.from("ai_summary_translations").upsert(
+      {
+        action_needed: translatedAction,
+        ai_summary_id: summaryId,
+        business_id: businessId,
+        language: targetLanguage,
+        summary: translatedSummary
+      },
+      { onConflict: "ai_summary_id,language" }
+    );
+
+    if (error) console.error("Could not cache owner summary translation:", error.message);
+  } catch (error) {
+    console.error("Could not cache owner summary translation:", error);
+  }
 }
 
 async function getBusinessContext(businessId) {
@@ -649,28 +846,28 @@ function fallbackTranscriptSummary(transcript, callerPhone, language = "en", fal
   const discussed = compactCallText(callerLines.join(" "), 420);
   const outcome = fallbackOutcome && fallbackOutcome !== "Realtime voice call ended." ? compactCallText(fallbackOutcome, 420) : "";
 
-  if (language === "es") {
-    if (discussed) {
-      return `La persona${callerPhone ? ` ${callerPhone}` : ""} habló con Ana sobre: ${discussed}`;
-    }
+	  if (language === "es") {
+	    if (discussed) {
+	      return `Llamada incompleta con Ana. Telefono: ${callerPhone || "No recopilado"}. Solicitud: ${discussed}. Informacion faltante: revisar nombre, direccion, servicio y horario si no aparecen en la solicitud. Accion necesaria: contactar al cliente para completar los detalles.`;
+	    }
 
     if (outcome) {
       return outcome;
     }
 
-    return `La persona${callerPhone ? ` ${callerPhone}` : ""} colgó o terminó la llamada antes de compartir detalles.`;
-  }
+	    return `La llamada termino antes de que Ana recopilara los detalles. Telefono: ${callerPhone || "No recopilado"}. Informacion faltante: nombre, direccion, servicio y horario. Accion necesaria: devolver la llamada si parece ser un cliente.`;
+	  }
 
-  if (discussed) {
-    return `Caller${callerPhone ? ` ${callerPhone}` : ""} spoke with Ana. Discussed: ${discussed}`;
-  }
+	  if (discussed) {
+	    return `Incomplete call with Ana. Phone: ${callerPhone || "Not collected"}. Request: ${discussed}. Missing information: review name, address, service, and timing if not included in the request. Action needed: contact the caller to complete the details.`;
+	  }
 
   if (outcome) {
     return outcome;
   }
 
-  return `The caller${callerPhone ? ` ${callerPhone}` : ""} hung up or ended the call before sharing details.`;
-}
+	  return `Call ended before Ana collected the details. Phone: ${callerPhone || "Not collected"}. Missing information: name, address, service, and timing. Action needed: call back if this appears to be a customer.`;
+	}
 
 function callerTranscriptText(transcript) {
   return String(transcript ?? "")
@@ -796,9 +993,10 @@ async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fal
   const hasLeadSignal = Boolean(serviceType || customerName || address || email);
 
   if (!hasLeadSignal) return null;
+  if (!cleanCustomerFullName(customerName, call.from_phone)) return null;
 
   const customer = await findOrCreateCustomer({
-    address,
+    address: null,
     businessId,
     email,
     name: customerName,
@@ -816,7 +1014,7 @@ async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fal
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .insert({
-      address: address || customer.address || null,
+      address: customer.address || null,
       ai_notes: compactCallText(callerText, 700),
       business_id: businessId,
       customer_id: customer.id,
@@ -874,9 +1072,10 @@ async function rewriteOwnerText({ kind = "summary", language, text }) {
               {
                 type: "input_text",
                 text:
-                  `Rewrite this owner-facing ${kind} in clear ${target}. ` +
+                  `Rewrite this owner-facing ${kind} in clear ${target}. Use a professional business summary style: short outcome sentence, customer details, request details, missing information, and recommended owner action. ` +
                   "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
-                  "Do not add facts. Return only the rewritten text."
+                  "Do not add facts. Do not include internal/debug phrases like tool call failed, realtime created, saved lead because, or owner approval SMS was not sent. " +
+                  "Convert internal states into owner-friendly wording such as Needs owner approval, New lead created, Name not collected, Address missing, or Call ended before Ana collected all details. Return only the rewritten text."
               }
             ],
             role: "developer"
@@ -953,25 +1152,38 @@ async function ensureCallArtifacts({ businessId, callSessionId, fallbackOutcome,
       .from("ai_summaries")
       .update({
         confidence: transcript ? 0.9 : 0.65,
-        summary,
         summary_language: language
       })
       .eq("id", existingSummary.id);
 
     if (summaryUpdateError) console.error("Could not update call AI summary:", summaryUpdateError.message);
-  } else {
-    const { error: summaryError } = await supabase.from("ai_summaries").insert({
-      action_needed: null,
-      business_id: businessId,
-      call_session_id: callSessionId,
-      confidence: transcript ? 0.9 : 0.65,
-      customer_id: call.customer_id || null,
-      summary,
-      summary_language: language
-    });
+	  } else {
+	    const { data: savedSummary, error: summaryError } = await supabase
+	      .from("ai_summaries")
+	      .insert({
+	        action_needed: null,
+	        business_id: businessId,
+	        call_session_id: callSessionId,
+	        confidence: transcript ? 0.9 : 0.65,
+	        customer_id: call.customer_id || null,
+	        summary,
+	        summary_language: language
+	      })
+	      .select("id")
+	      .maybeSingle();
 
-    if (summaryError) console.error("Could not create call AI summary:", summaryError.message);
-  }
+	    if (summaryError) console.error("Could not create call AI summary:", summaryError.message);
+	    if (savedSummary?.id) {
+	      await cacheOppositeOwnerSummaryTranslation({
+	        actionNeeded: null,
+	        businessId,
+	        language,
+	        summary,
+	        summaryId: savedSummary.id,
+	        supabase
+	      });
+	    }
+	  }
 
   const { data: existingMessage } = await supabase
     .from("messages")
@@ -1157,7 +1369,7 @@ async function findOrCreateCustomer({ address, businessId, email, geocodedAddres
   const normalizedPhone = normalizePhone(phone);
   const normalizedAddress = normalizeAddressForStorage(address);
   const source = normalizeCustomerSource(referralSource);
-  const fullName = String(name || "").trim();
+  const fullName = cleanCustomerFullName(name, normalizedPhone);
 
   if (normalizedPhone) {
     const { data: existing } = await supabase
@@ -1182,7 +1394,7 @@ async function findOrCreateCustomer({ address, businessId, email, geocodedAddres
       if (source !== "other" && (!existing.referral_source || existing.referral_source === "other")) {
         updates.referral_source = source;
       }
-      if (fullName && /^(phone caller|caller\s+\+?\d+)/i.test(String(existing.full_name || ""))) {
+      if (fullName && isPlaceholderCustomerName(existing.full_name, normalizedPhone)) {
         updates.full_name = fullName;
       }
 
@@ -1208,7 +1420,7 @@ async function findOrCreateCustomer({ address, businessId, email, geocodedAddres
       address: normalizedAddress,
       business_id: businessId,
       email: email || null,
-      full_name: fullName || (normalizedPhone ? `Caller ${normalizedPhone}` : "Phone caller"),
+      full_name: fullName || "Phone caller",
       geocode_accuracy: geocodedAddress?.accuracy ?? null,
       geocode_provider: geocodedAddress?.provider ?? null,
       geocoded_at: geocodedAddress ? new Date().toISOString() : null,
@@ -1243,7 +1455,7 @@ async function evaluateServiceArea({ address, business, radiusRule }) {
   const baseLng = numericCoordinate(business?.base_lng);
   const radiusMiles = Number(radiusRule?.radius_miles);
 
-  if (!address || baseLat === null || baseLng === null || !Number.isFinite(radiusMiles) || radiusMiles <= 0) {
+  if (!address) {
     return { checked: false, ok: true, reason: "service_area_not_configured" };
   }
 
@@ -1254,6 +1466,15 @@ async function evaluateServiceArea({ address, business, radiusRule }) {
     }
 
     return { checked: true, error: geocoded.error, ok: false, reason: "geocoding_failed" };
+  }
+
+  if (baseLat === null || baseLng === null || !Number.isFinite(radiusMiles) || radiusMiles <= 0) {
+    return {
+      checked: true,
+      geocodedAddress: geocoded.address,
+      ok: true,
+      reason: "address_verified"
+    };
   }
 
   const distance = distanceMiles({ lat: baseLat, lng: baseLng }, { lat: geocoded.address.lat, lng: geocoded.address.lng });
@@ -1387,11 +1608,21 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
       : null;
   const providedAddress = normalizeAddressForStorage(args.address);
   const savedAddress = normalizeAddressForStorage(existingCustomer?.address);
-  const addressConfirmed = args.address_confirmed === true || String(args.address_confirmed).toLowerCase() === "true";
+  const addressConfirmed = addressConfirmedValue(args.address_confirmed);
+  const customerFullName = requireCustomerFullName({ args, callerPhone, existingCustomer });
 
   if (!serviceOptions.includes(args.service_type)) {
     return { ok: false, message: "That service is not in this business's service list.", service_options: serviceOptions };
   }
+
+  if (!customerFullName) {
+    return {
+      ok: false,
+      message:
+        "Before saving anything, ask the caller for their full first and last name. Do not use the phone number as the name. Only call book_appointment again after they provide it."
+    };
+  }
+  args.customer_name = customerFullName;
 
   if (existingCustomer?.id && savedAddress && !addressConfirmed) {
     return {
@@ -1408,6 +1639,14 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 
   if (!normalizeAddressForStorage(args.address)) {
     return { ok: false, message: "Ask for the service address before booking." };
+  }
+
+  if (!isPlausibleServiceAddress(args.address)) {
+    return {
+      ok: false,
+      message:
+        "Ask for the full street address again, including street number, street name, city, and state if available. Do not save a vague or guessed address."
+    };
   }
 
   if (!addressConfirmed) {
@@ -1473,8 +1712,8 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
     };
   }
 
-  const address = normalizeAddressForStorage(args.address);
-  const serviceArea = await evaluateServiceArea({ address, business, radiusRule });
+  const requestedAddress = normalizeAddressForStorage(args.address);
+  const serviceArea = await evaluateServiceArea({ address: requestedAddress, business, radiusRule });
   if (!serviceArea.ok) {
     return {
       distance_miles: serviceArea.distanceMiles ? Number(serviceArea.distanceMiles.toFixed(1)) : null,
@@ -1488,8 +1727,10 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
     };
   }
 
+  const address = normalizeAddressForStorage(serviceArea.geocodedAddress?.formattedAddress || requestedAddress);
+
   const customer = await findOrCreateCustomer({
-    address: args.address,
+    address,
     businessId,
     email: args.customer_email,
     geocodedAddress: serviceArea.geocodedAddress,
@@ -1560,31 +1801,44 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
         contact_type: "customer",
         customer_id: customer.id,
         job_id: job.id,
-        needs_owner_review: ownerApproval.ok,
-        outcome: ownerApproval.ok
-          ? `Pending owner approval for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}.`
-          : `Saved lead for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)} because owner approval SMS was not sent.`,
-        status: "completed"
-      })
-      .eq("id", callSessionId);
+	        needs_owner_review: ownerApproval.ok,
+	        outcome: ownerApproval.ok
+	          ? `Needs owner approval for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}.`
+	          : `New lead created for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}. Owner follow-up needed.`,
+	        status: "completed"
+	      })
+	      .eq("id", callSessionId);
 
-    const language = ownerSummaryLanguage(business.owner_summary_language);
-    const summary = friendlyBookingSummary({
-      address: address || customer.address || null,
-      customerName: customer.full_name,
-      language,
-      ownerApprovalSent: ownerApproval.ok,
-      scheduledFor: spokenDateTime(start, timeZone),
-      serviceType: args.service_type
-    });
+	    const language = ownerSummaryLanguage(business.owner_summary_language);
+	    const customerPhone = normalizePhone(args.customer_phone || callerPhone || customer.phone);
+	    const scheduledFor = spokenDateTime(start, timeZone);
+	    const summary = friendlyBookingSummary({
+	      address: address || customer.address || null,
+	      customerName: customer.full_name,
+	      customerPhone,
+	      language,
+	      ownerApprovalSent: ownerApproval.ok,
+	      scheduledFor,
+	      serviceType: args.service_type
+	    });
+	    const ownerMessageBody = ownerSummarySmsBody({
+	      address: address || customer.address || null,
+	      customerName: customer.full_name,
+	      customerPhone,
+	      language,
+	      requestedFor: scheduledFor,
+	      serviceType: args.service_type,
+	      status: ownerApproval.ok ? "approval" : "lead"
+	    });
 
-    await notifyOwnerSummary({
-      businessId,
-      callSessionId,
-      customerId: customer.id,
-      ownerEmail,
-      ownerPhone,
-      summary,
+	    await notifyOwnerSummary({
+	      businessId,
+	      callSessionId,
+	      customerId: customer.id,
+	      ownerMessageBody,
+	      ownerEmail,
+	      ownerPhone,
+	      summary,
       summaryChannel: business.owner_summary_channel,
       summaryLanguage: language,
       supabase
@@ -1604,27 +1858,83 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 }
 
 async function recordCallSummary({ args, businessId, callerPhone, callSessionId }) {
-  const { business, ownerEmail, ownerPhone, supabase } = await getBusinessContext(businessId);
+  const { business, ownerEmail, ownerPhone, radiusRule, supabase } = await getBusinessContext(businessId);
+  const existingCustomer = callSessionId ? await getKnownCustomerForCall({ callSessionId, supabase }) : null;
   const address = normalizeAddressForStorage(args.address);
+  const addressConfirmed = addressConfirmedValue(args.address_confirmed);
+  const customerFullName = requireCustomerFullName({ args, callerPhone, existingCustomer });
+  const serviceType = isServiceOption(args.service_type) ? args.service_type : extractedServiceType(args.summary, businessServiceOptions(business));
+  const serviceRequested = Boolean(serviceType || args.service_type);
+
+  if (!customerFullName) {
+    return {
+      ok: false,
+      message:
+        "Ask the caller for their full first and last name before saving the call summary. Do not use the phone number as the customer name."
+    };
+  }
+
+  if (serviceRequested && !address) {
+    return {
+      ok: false,
+      message:
+        "Ask for the service address before saving this lead. Repeat it back and get confirmation before calling record_call_summary again."
+    };
+  }
+
+  if (address && !isPlausibleServiceAddress(address)) {
+    return {
+      ok: false,
+      message:
+        "Ask for the full street address again, including street number, street name, city, and state if available. Do not save a vague or guessed address."
+    };
+  }
+
+  if (address && !addressConfirmed) {
+    return {
+      ok: false,
+      message:
+        "Before saving the lead, repeat the service address in a friendly way and ask the caller to confirm it. Only call record_call_summary again after they confirm."
+    };
+  }
+
+  const serviceArea = address ? await evaluateServiceArea({ address, business, radiusRule }) : { ok: true };
+  if (!serviceArea.ok) {
+    return {
+      distance_miles: serviceArea.distanceMiles ? Number(serviceArea.distanceMiles.toFixed(1)) : null,
+      message:
+        serviceArea.reason === "outside_radius"
+          ? "This address is outside the business service area. Tell the caller the business is not currently serving that area."
+          : serviceArea.error || "Ask for the service address again.",
+      ok: false,
+      radius_miles: serviceArea.radiusMiles ?? null,
+      service_area: serviceArea.reason
+    };
+  }
+
+  const storageAddress = normalizeAddressForStorage(serviceArea.geocodedAddress?.formattedAddress || address);
+
   const customer = await findOrCreateCustomer({
-    address: args.address,
+    address: storageAddress,
     businessId,
     email: args.customer_email,
-    name: args.customer_name,
+    geocodedAddress: serviceArea.geocodedAddress,
+    name: customerFullName,
     phone: args.customer_phone || callerPhone,
     referralSource: args.how_heard_about_us,
     supabase
   });
   const language = ownerSummaryLanguage(business.owner_summary_language);
-  const service = isServiceOption(args.service_type) ? serviceLabel(args.service_type) : args.service_type || "service";
   const requestedDay = cleanupExtractedPhrase([args.preferred_date, args.preferred_time].filter(Boolean).join(" "), 80);
+  const customerPhone = normalizePhone(args.customer_phone || callerPhone || customer.phone);
   const summary = friendlyLeadSummary({
-    address: address || customer.address || null,
+    address: storageAddress || customer.address || null,
     customerName: customer.full_name,
+    customerPhone,
     details: args.summary,
     language,
     scheduledFor: requestedDay,
-    serviceType: isServiceOption(args.service_type) ? args.service_type : service
+    serviceType: serviceType || args.service_type || "service"
   });
   const actionNeeded =
     args.action_needed ||
@@ -1633,14 +1943,19 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
   const { data: job } = await supabase
     .from("jobs")
     .insert({
-      address: address || customer.address || null,
+      address: storageAddress || customer.address || null,
       ai_notes: args.summary || null,
       business_id: businessId,
       customer_id: customer.id,
       estimated_value: 0,
-      service_type: isServiceOption(args.service_type) ? args.service_type : null,
+      geocode_accuracy: serviceArea.geocodedAddress?.accuracy ?? null,
+      geocode_provider: serviceArea.geocodedAddress?.provider ?? null,
+      geocoded_at: serviceArea.geocodedAddress ? new Date().toISOString() : null,
+      lat: serviceArea.geocodedAddress?.lat ?? null,
+      lng: serviceArea.geocodedAddress?.lng ?? null,
+      service_type: serviceType || null,
       status: "lead",
-      title: `${service} lead`
+      title: `${serviceType ? serviceLabel(serviceType) : args.service_type || "Service"} lead`
     })
     .select("id")
     .maybeSingle();
@@ -1672,6 +1987,15 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
     businessId,
     callSessionId,
     customerId: customer.id,
+    ownerMessageBody: ownerSummarySmsBody({
+      address: storageAddress || customer.address || null,
+      customerName: customer.full_name,
+      customerPhone,
+      language,
+      requestedFor: requestedDay,
+      serviceType: serviceType || args.service_type || "service",
+      status: "lead"
+    }),
     ownerEmail,
     ownerPhone,
     summary,
@@ -1707,6 +2031,7 @@ async function finishRealtimeCall({
   allowFallbackLead = true,
   businessId,
   callSessionId,
+  extractedData,
   outcome = "Realtime voice call ended.",
   status = "completed",
   transcript
@@ -1715,7 +2040,7 @@ async function finishRealtimeCall({
   const { supabase } = await getBusinessContext(businessId);
   const { data: existing, error } = await supabase
     .from("call_sessions")
-    .select("id,status,outcome,transcript")
+    .select("id,status,outcome,transcript,extracted_data")
     .eq("id", callSessionId)
     .maybeSingle();
 
@@ -1726,6 +2051,7 @@ async function finishRealtimeCall({
 
   const values = {
     ended_at: new Date().toISOString(),
+    extracted_data: extractedData && Object.keys(extractedData).length ? extractedData : existing.extracted_data || {},
     transcript: transcript || existing.transcript || null
   };
 
@@ -1901,14 +2227,20 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
       parameters: {
         type: "object",
         properties: {
-          address: { type: "string" },
+          address: {
+            type: "string",
+            description: "Full service street address exactly as provided and confirmed by the caller. Never invent or guess an address."
+          },
           address_confirmed: {
             type: "boolean",
             description:
               "True only after the caller verbally confirms the service address during this call. For an existing customer, confirm their saved address or ask for the new address first."
           },
           customer_email: { type: "string" },
-          customer_name: { type: "string" },
+          customer_name: {
+            type: "string",
+            description: "Customer's real full first and last name. Never pass a phone number, Caller +phone, or placeholder."
+          },
           customer_phone: { type: "string" },
           duration_minutes: { type: "number" },
           estimated_value: { type: "number", description: "Use the known customer service fee when available. Use 0 for quote appointments or unknown pricing." },
@@ -1945,9 +2277,20 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
         type: "object",
         properties: {
           action_needed: { type: "string" },
-          address: { type: "string" },
+          address: {
+            type: "string",
+            description: "Full service street address exactly as provided and confirmed by the caller. Never invent or guess an address."
+          },
+          address_confirmed: {
+            type: "boolean",
+            description:
+              "True only after the caller verbally confirms the service address during this call. Never infer this from the transcript alone."
+          },
           customer_email: { type: "string" },
-          customer_name: { type: "string" },
+          customer_name: {
+            type: "string",
+            description: "Customer's real full first and last name. Never pass a phone number, Caller +phone, or placeholder."
+          },
           customer_phone: { type: "string" },
           how_heard_about_us: {
             type: "string",
@@ -1963,7 +2306,11 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
             description: "Time of day the caller wants, if they mentioned one but did not book a confirmed slot."
           },
           service_type: { type: "string" },
-          summary: { type: "string" }
+          summary: {
+            type: "string",
+            description:
+              "Professional owner-facing summary using only facts the caller shared. Do not invent names, addresses, dates, prices, or service details."
+          }
         },
         required: ["customer_name", "summary"]
       }
@@ -1992,6 +2339,7 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
   const timeZone = businessTimeZone(business);
   const serviceOptions = businessServiceOptions(business);
   const knownCustomerName = String(knownCustomer?.full_name || "").trim();
+  const hasKnownCustomerFullName = Boolean(cleanCustomerFullName(knownCustomerName, knownCustomer?.phone));
   const knownCustomerFirstName = knownCustomerName.split(/\s+/)[0];
   const knownCustomerAddress = normalizeAddressForStorage(knownCustomer?.address);
   const baseLat = numericCoordinate(business?.base_lat);
@@ -2004,11 +2352,15 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
   return [
     `You are ${agent}, a warm phone receptionist for ${business.name}, a ${business.trade} business.`,
     "Sound upbeat, friendly, and human, like a great neighborhood coffee shop barista who remembers regulars. Keep replies short, warm, and natural.",
-    knownCustomer?.id
+    knownCustomer?.id && hasKnownCustomerFullName
       ? `This looks like a returning customer: ${knownCustomerName || "the caller"}${knownCustomerAddress ? `, saved address ${knownCustomerAddress}` : ""}.`
-      : `Open the call naturally with: "Hi, this is ${agent} with ${business.name}. How are you today? Have you used our service before?"`,
-    knownCustomer?.id && knownCustomerAddress
+      : knownCustomer?.id
+        ? "This caller has called before, but their real full name is not saved yet. Do not call them by the phone number or by a placeholder name."
+        : `Open the call naturally with: "Hi, this is ${agent} with ${business.name}. How are you today? Have you used our service before?"`,
+    knownCustomer?.id && hasKnownCustomerFullName && knownCustomerAddress
       ? `For this returning customer, greet them by first name if it feels natural, then confirm the saved address before asking for a new one. Example tone: "Hey ${knownCustomerFirstName || "there"}, good to hear from you! Are we still helping out at ${knownCustomerAddress}, or is it a different spot today?"`
+      : knownCustomer?.id && !hasKnownCustomerFullName
+        ? "Before taking or saving lead details, ask for the caller's full first and last name in a natural way."
       : "If the caller has used the service before, briefly ask how it went, then move to what they need today.",
     "If the caller is a new customer, later ask naturally: 'How did you hear about us?' Do not say 'referral source' to callers.",
     `If asked what you are, be honest and say you are ${agent}, the virtual receptionist.`,
@@ -2016,6 +2368,8 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
     "Do not say phrases like approval needed, summary to owner, record a summary, tool call, or function call. Keep workflow invisible and speak only like a receptionist.",
     "If a system action fails, do not tell the caller there was a data-entry, database, tool, or system issue. Keep taking details and say someone can follow up if needed.",
     "Detect the caller's language and continue in that language when you can. Confirm names, phone numbers, addresses, dates, and times carefully.",
+    "Never invent a customer name, service address, date, time, price, or call detail. If you did not hear it from the caller, ask for it or leave it out.",
+    "For new callers and callers saved only as a phone number, ask for their full first and last name before calling book_appointment or record_call_summary.",
     "Before saving or booking with an address, repeat the street number, street name, city, and state if available, and ask the caller to confirm. Make it feel easy and friendly, not like a form. If a street name is unclear or could be misspelled, ask the caller to spell it.",
     `Today is ${spokenDateTime(new Date(), timeZone)}. The business timezone is ${timeZone}.`,
     `The owner is ${ownerName}.`,
@@ -2045,6 +2399,83 @@ function createOpenAiSocket() {
       Authorization: `Bearer ${requiredEnv("OPENAI_API_KEY")}`
     }
   });
+}
+
+function callLog(call, level, message, details = {}) {
+  const logger = console[level] || console.log;
+  logger(`[voice-call] ${message}`, {
+    businessId: call?.businessId || null,
+    callId: call?.callId || call?.callSessionId || null,
+    streamSid: call?.twilioStreamSid || call?.streamSid || null,
+    twilioCallSid: call?.twilioCallSid || call?.callSid || null,
+    ...details
+  });
+}
+
+function transcriptText(call) {
+  if (call?.transcriptParts?.length) return call.transcriptParts.join("\n");
+  return (call?.transcript || []).map((entry) => `${entry.role === "ana" ? "Ana" : entry.role === "caller" ? "Caller" : "System"}: ${entry.text}`).join("\n");
+}
+
+function appendTranscript(call, role, text) {
+  const cleanText = String(text || "").trim();
+  if (!call || !cleanText) return;
+  const at = new Date().toISOString();
+  call.transcript.push({ at, role, text: cleanText });
+  call.transcriptParts.push(`${role === "ana" ? "Ana" : role === "caller" ? "Caller" : "System"}: ${cleanText}`);
+}
+
+function recordExtractedData(call, toolName, output) {
+  if (!call || !toolName || !output || typeof output !== "object") return;
+  const values = Array.isArray(call.extractedData[toolName]) ? call.extractedData[toolName] : [];
+  call.extractedData[toolName] = [...values, { at: new Date().toISOString(), output }].slice(-10);
+}
+
+async function ensureRealtimeCallRecord({ businessId, callSessionId, callerPhone, twilioCallSid, twilioStreamSid }) {
+  const { supabase } = await getBusinessContext(businessId);
+  const values = {
+    status: "active"
+  };
+  if (callerPhone) values.from_phone = normalizePhone(callerPhone);
+  if (twilioCallSid) values.provider_call_id = twilioCallSid;
+  if (twilioStreamSid) values.twilio_stream_sid = twilioStreamSid;
+
+  if (callSessionId) {
+    const { error } = await supabase.from("call_sessions").update(values).eq("id", callSessionId);
+    if (error) throw new Error(error.message);
+    return callSessionId;
+  }
+
+  if (twilioCallSid) {
+    const { data: existing, error } = await supabase
+      .from("call_sessions")
+      .select("id")
+      .eq("provider_call_id", twilioCallSid)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (existing?.id) {
+      const { error: updateError } = await supabase.from("call_sessions").update(values).eq("id", existing.id);
+      if (updateError) throw new Error(updateError.message);
+      return existing.id;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("call_sessions")
+    .insert({
+      business_id: businessId,
+      contact_type: "unknown",
+      from_phone: normalizePhone(callerPhone),
+      provider_call_id: twilioCallSid || null,
+      screening_result: "realtime_stream_started",
+      status: "active",
+      twilio_stream_sid: twilioStreamSid || null
+    })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data.id;
 }
 
 async function handleToolCall({ call, state, openaiWs, twilioWs }) {
@@ -2107,13 +2538,15 @@ async function handleToolCall({ call, state, openaiWs, twilioWs }) {
     } else {
       output = { ok: false, message: `Unknown tool ${call.name}.` };
     }
-  } catch (error) {
-    console.error(`Realtime tool ${call.name} failed:`, error);
-    output = {
-      ok: false,
-      message: "I can still take the caller's details for follow-up. Do not mention system, database, tool, or data-entry problems to the caller."
-    };
-  }
+	  } catch (error) {
+	    console.error(`Realtime tool ${call.name} failed:`, error);
+	    output = {
+	      ok: false,
+	      message: "I can still take the caller's details for follow-up. Do not mention system, database, tool, or data-entry problems to the caller."
+	    };
+	  }
+
+  recordExtractedData(state, call.name, output);
 
   sendJson(openaiWs, {
     type: "conversation.item.create",
@@ -2168,202 +2601,330 @@ async function configureRealtimeSession(openaiWs, state) {
 }
 
 function handleTwilioConnection(twilioWs) {
-  const state = {
-    businessId: null,
-    callSessionId: null,
-    callSid: null,
-    finalized: false,
-    fromPhone: null,
-    greeted: false,
-    hangupTimer: null,
-    knownCustomer: null,
-    openaiReady: false,
-    pendingHangup: false,
-    realtimeFailed: false,
-    streamSid: null,
-    transcriptParts: []
-  };
-  const queuedAudio = [];
-  let openaiWs;
+  let activeCall = null;
 
-  try {
-    openaiWs = createOpenAiSocket();
-  } catch (error) {
-    console.error("Could not create OpenAI realtime socket:", error);
-    twilioWs.close(1011, "openai configuration failed");
-    return;
+  async function cleanupCall(call, options = {}) {
+    if (!call || call.cleanupStarted) return;
+    call.cleanupStarted = true;
+    call.status = options.status || (call.failReason ? "failed" : "completed");
+    activeVoiceCalls.remove(call);
+
+    if (call.hangupTimer) {
+      clearTimeout(call.hangupTimer);
+      call.hangupTimer = null;
+    }
+
+    if (options.closeRealtime !== false && call.realtimeSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(call.realtimeSocket.readyState)) {
+      call.realtimeSocket.close();
+    }
+
+    if (options.closeTwilio && [WebSocket.CONNECTING, WebSocket.OPEN].includes(call.twilioSocket.readyState)) {
+      call.twilioSocket.close(call.status === "failed" ? 1011 : 1000, call.status === "failed" ? "call failed" : "call ended");
+    }
+
+    if (call.businessId && call.callSessionId) {
+      await finishRealtimeCall({
+        allowFallbackLead: options.allowFallbackLead ?? !call.finalized,
+        businessId: call.businessId,
+        callSessionId: call.callSessionId,
+        extractedData: call.extractedData,
+        outcome: options.outcome || call.failReason || "Realtime voice call ended.",
+        status: call.status,
+        transcript: transcriptText(call)
+      }).catch((error) => callLog(call, "error", "Could not update call session", { error: error.message }));
+    }
+
+    callLog(call, call.status === "failed" ? "warn" : "log", "Cleaned up realtime voice call");
   }
 
-  openaiWs.on("open", () => {
-    state.openaiReady = true;
-    while (queuedAudio.length) {
-      sendJson(openaiWs, { type: "input_audio_buffer.append", audio: queuedAudio.shift() });
-    }
-  });
+  function startOpenAiForCall(call) {
+    let openaiWs;
 
-  openaiWs.on("message", async (raw) => {
-    const event = safeParseJson(raw.toString(), null);
-    if (!event) return;
-
-    if (event.type === "session.created" && state.businessId) {
-      await configureRealtimeSession(openaiWs, state).catch((error) => {
-        console.error("Could not configure realtime session:", error);
-        twilioWs.close(1011, "configuration failed");
-      });
+    try {
+      openaiWs = createOpenAiSocket();
+    } catch (error) {
+      call.failReason = "Sorry, Ana is temporarily unavailable. Please call back shortly.";
+      callLog(call, "error", "Could not create OpenAI realtime socket", { error: error.message });
+      void cleanupCall(call, { allowFallbackLead: false, closeTwilio: true, status: "failed", outcome: call.failReason });
       return;
     }
 
-    if (event.type === "session.updated" && !state.greeted) {
-      state.greeted = true;
-      const customerName = String(state.knownCustomer?.full_name || "").trim();
-      const firstName = customerName.split(/\s+/)[0];
-      const savedAddress = normalizeAddressForStorage(state.knownCustomer?.address);
-      const greetingInstructions =
-        state.knownCustomer?.id && savedAddress
-          ? `Greet ${firstName || "the caller"} warmly as a returning customer for ${agentName(state.business)} with ${state.business?.name || "the business"}. Use an upbeat, human tone. Ask how they are, then say something like: "Are we still helping out at ${savedAddress}, or is it a different spot today?" Keep it under three short sentences.`
-          : state.knownCustomer?.id
-            ? `Greet ${firstName || "the caller"} warmly as a returning customer for ${agentName(state.business)} with ${state.business?.name || "the business"}. Ask how they are and what they need today. Keep it under two sentences.`
-            : `Greet the caller as ${agentName(state.business)} with ${state.business?.name || "the business"}. Ask how they are today, then ask if they have used the service before. Keep it under two sentences.`;
-      sendJson(openaiWs, {
-        type: "response.create",
-        response: {
-          instructions: greetingInstructions
-        }
-      });
-      return;
-    }
+    call.realtimeSocket = openaiWs;
+    call.openaiWs = openaiWs;
 
-    if ((event.type === "response.output_audio.delta" || event.type === "response.audio.delta") && event.delta && state.streamSid) {
-      sendJson(twilioWs, {
-        event: "media",
-        streamSid: state.streamSid,
-        media: {
-          payload: event.delta
-        }
-      });
-      return;
-    }
-
-    if (event.type === "input_audio_buffer.speech_started" && state.streamSid) {
-      sendJson(twilioWs, { event: "clear", streamSid: state.streamSid });
-      return;
-    }
-
-    if (event.type === "response.output_audio_transcript.done" && event.transcript) {
-      state.transcriptParts.push(`Ana: ${event.transcript}`);
-      return;
-    }
-
-    if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
-      state.transcriptParts.push(`Caller: ${event.transcript}`);
-      return;
-    }
-
-    if (event.type === "response.done") {
-      const calls = event.response?.output?.filter((item) => item.type === "function_call") || [];
-      for (const call of calls) {
-        await handleToolCall({ call, openaiWs, state, twilioWs });
+    openaiWs.on("open", () => {
+      call.openaiReady = true;
+      callLog(call, "log", "OpenAI realtime socket opened");
+      while (call.queuedAudio.length) {
+        sendJson(openaiWs, { type: "input_audio_buffer.append", audio: call.queuedAudio.shift() });
       }
-      if (!calls.length && state.pendingHangup) {
-        state.pendingHangup = false;
-        scheduleLiveHangup({ state, twilioWs });
-      }
-      return;
-    }
+    });
 
-    if (event.type === "error") {
-      if (event.error?.code === "response_cancel_not_active") {
-        console.warn("Ignoring stale OpenAI realtime cancellation:", event.error.message);
+    openaiWs.on("message", async (raw) => {
+      const event = safeParseJson(raw.toString(), null);
+      if (!event || call.cleanupStarted) return;
+
+      if (event.type === "session.created" && call.businessId) {
+        await configureRealtimeSession(openaiWs, call).catch((error) => {
+          call.failReason = "Sorry, Ana is temporarily unavailable. Please call back shortly.";
+          callLog(call, "error", "Could not configure realtime session", { error: error.message });
+          void cleanupCall(call, { allowFallbackLead: false, closeTwilio: true, status: "failed", outcome: call.failReason });
+        });
         return;
       }
 
-      console.error("OpenAI realtime error:", event.error || event);
-      if (state.realtimeFailed) return;
-      state.realtimeFailed = true;
-      await failLiveCall({
-        message: "Sorry, Ana is temporarily unavailable. Please call back shortly.",
-        state,
-        twilioWs
-      });
-    }
-  });
+      if (event.type === "session.updated" && !call.greeted) {
+        call.greeted = true;
+        const customerName = String(call.knownCustomer?.full_name || "").trim();
+        const hasCustomerFullName = Boolean(cleanCustomerFullName(customerName, call.knownCustomer?.phone || call.fromPhone));
+        const firstName = customerName.split(/\s+/)[0];
+        const savedAddress = normalizeAddressForStorage(call.knownCustomer?.address);
+        const greetingInstructions =
+          call.knownCustomer?.id && hasCustomerFullName && savedAddress
+            ? `Greet ${firstName || "the caller"} warmly as a returning customer for ${agentName(call.business)} with ${call.business?.name || "the business"}. Use an upbeat, human tone. Ask how they are, then say something like: "Are we still helping out at ${savedAddress}, or is it a different spot today?" Keep it under three short sentences.`
+            : call.knownCustomer?.id && hasCustomerFullName
+              ? `Greet ${firstName || "the caller"} warmly as a returning customer for ${agentName(call.business)} with ${call.business?.name || "the business"}. Ask how they are and what they need today. Keep it under two sentences.`
+              : call.knownCustomer?.id
+                ? `Greet the caller as ${agentName(call.business)} with ${call.business?.name || "the business"}. Ask how they are today, then ask for their full first and last name before taking service details. Do not use their phone number as their name. Keep it under two sentences.`
+                : `Greet the caller as ${agentName(call.business)} with ${call.business?.name || "the business"}. Ask how they are today, then ask if they have used the service before. Keep it under two sentences.`;
+        sendJson(openaiWs, {
+          type: "response.create",
+          response: {
+            instructions: greetingInstructions
+          }
+        });
+        return;
+      }
 
-  openaiWs.on("error", (error) => {
-    console.error("OpenAI websocket error:", error);
-    if (state.realtimeFailed) return;
-    state.realtimeFailed = true;
-    void failLiveCall({
-      message: "Sorry, Ana is temporarily unavailable. Please call back shortly.",
-      state,
-      twilioWs
+      if ((event.type === "response.output_audio.delta" || event.type === "response.audio.delta") && event.delta && call.twilioStreamSid) {
+        sendJson(call.twilioSocket, {
+          event: "media",
+          streamSid: call.twilioStreamSid,
+          media: {
+            payload: event.delta
+          }
+        });
+        return;
+      }
+
+      if (event.type === "input_audio_buffer.speech_started" && call.twilioStreamSid) {
+        sendJson(call.twilioSocket, { event: "clear", streamSid: call.twilioStreamSid });
+        return;
+      }
+
+      if (event.type === "response.output_audio_transcript.done" && event.transcript) {
+        appendTranscript(call, "ana", event.transcript);
+        return;
+      }
+
+      if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
+        appendTranscript(call, "caller", event.transcript);
+        return;
+      }
+
+      if (event.type === "response.done") {
+        const calls = event.response?.output?.filter((item) => item.type === "function_call") || [];
+        for (const toolCall of calls) {
+          await handleToolCall({ call: toolCall, openaiWs, state: call, twilioWs: call.twilioSocket });
+        }
+        if (!calls.length && call.pendingHangup) {
+          call.pendingHangup = false;
+          scheduleLiveHangup({ state: call, twilioWs: call.twilioSocket });
+        }
+        return;
+      }
+
+      if (event.type === "error") {
+        if (event.error?.code === "response_cancel_not_active") {
+          callLog(call, "warn", "Ignoring stale OpenAI realtime cancellation", { error: event.error.message });
+          return;
+        }
+
+        callLog(call, "error", "OpenAI realtime error", { error: event.error || event });
+        if (call.realtimeFailed) return;
+        call.realtimeFailed = true;
+        call.failReason = "Sorry, Ana is temporarily unavailable. Please call back shortly.";
+        await failLiveCall({
+          message: call.failReason,
+          state: call,
+          twilioWs: call.twilioSocket
+        });
+        await cleanupCall(call, { allowFallbackLead: false, status: "failed", outcome: call.failReason });
+      }
     });
-  });
 
-  openaiWs.on("close", () => {
-    if (twilioWs.readyState === WebSocket.OPEN) twilioWs.close();
-  });
+    openaiWs.on("error", (error) => {
+      callLog(call, "error", "OpenAI websocket error", { error: error.message });
+      if (call.realtimeFailed || call.cleanupStarted) return;
+      call.realtimeFailed = true;
+      call.failReason = "Sorry, Ana is temporarily unavailable. Please call back shortly.";
+      void failLiveCall({
+        message: call.failReason,
+        state: call,
+        twilioWs: call.twilioSocket
+      }).finally(() => {
+        void cleanupCall(call, { allowFallbackLead: false, status: "failed", outcome: call.failReason });
+      });
+    });
+
+    openaiWs.on("close", () => {
+      if (call.cleanupStarted) return;
+      call.failReason = call.failReason || "OpenAI realtime session closed unexpectedly.";
+      void cleanupCall(call, { allowFallbackLead: false, closeTwilio: true, status: "failed", outcome: call.failReason });
+    });
+  }
 
   twilioWs.on("message", async (raw) => {
     const event = safeParseJson(raw.toString(), null);
     if (!event) return;
 
     if (event.event === "start") {
-      state.streamSid = event.streamSid || event.start?.streamSid;
-      state.callSid = event.start?.callSid;
-      state.businessId = event.start?.customParameters?.businessId;
-      state.callSessionId = event.start?.customParameters?.callSessionId;
-      state.fromPhone = event.start?.customParameters?.fromPhone;
+      const start = event.start || {};
+      const customParameters = start.customParameters || {};
+      const twilioStreamSid = event.streamSid || start.streamSid;
+      const twilioCallSid = start.callSid || event.callSid;
+      const businessId = customParameters.businessId;
+      const callerPhone = customParameters.fromPhone;
+      let callSessionId = customParameters.callSessionId;
 
-      if (!state.businessId) {
+      if (activeCall) {
+        callLog(activeCall, "warn", "Ignoring duplicate Twilio start event for websocket");
+        return;
+      }
+
+      if (!businessId) {
         twilioWs.close(1008, "missing business id");
         return;
       }
 
-      if (state.openaiReady) {
-        await configureRealtimeSession(openaiWs, state).catch((error) => {
-          console.error("Could not configure realtime session:", error);
-          twilioWs.close(1011, "configuration failed");
+      if (!twilioStreamSid) {
+        console.warn("[voice-call] Closing Twilio stream without StreamSid", { businessId, twilioCallSid });
+        twilioWs.close(1008, "missing stream sid");
+        return;
+      }
+
+      if (twilioCallSid && activeVoiceCalls.getByCallSid(twilioCallSid)) {
+        console.warn("[voice-call] Closing duplicate active Twilio CallSid", { businessId, twilioCallSid, twilioStreamSid });
+        twilioWs.close(1013, "duplicate call sid");
+        return;
+      }
+
+      // TODO: Enforce max_simultaneous_ai_calls here if plan settings add a per-business concurrent-call limit.
+      activeCall = activeVoiceCalls.add({
+        business: null,
+        businessId,
+        callId: callSessionId || null,
+        callSessionId: callSessionId || null,
+        callerPhone,
+        cleanupStarted: false,
+        extractedData: {},
+        failReason: null,
+        finalized: false,
+        fromPhone: callerPhone,
+        greeted: false,
+        hangupTimer: null,
+        knownCustomer: null,
+        openaiReady: false,
+        pendingHangup: false,
+        queuedAudio: [],
+        realtimeFailed: false,
+        realtimeSocket: null,
+        startedAt: new Date().toISOString(),
+        status: "active_with_ana",
+        streamSid: twilioStreamSid,
+        transcript: [],
+        transcriptParts: [],
+        twilioCallSid,
+        callSid: twilioCallSid,
+        twilioSocket: twilioWs,
+        twilioStreamSid
+      });
+      callLog(activeCall, "log", "Twilio stream started");
+
+      try {
+        callSessionId = await ensureRealtimeCallRecord({
+          businessId,
+          callerPhone,
+          callSessionId,
+          twilioCallSid,
+          twilioStreamSid
         });
+        activeCall.callId = callSessionId;
+        activeCall.callSessionId = callSessionId;
+        startOpenAiForCall(activeCall);
+      } catch (error) {
+        activeCall.failReason = "Could not prepare Ana for this call.";
+        callLog(activeCall, "error", "Could not create or update Supabase call record", { error: error.message });
+        await cleanupCall(activeCall, { allowFallbackLead: false, closeTwilio: true, status: "failed", outcome: activeCall.failReason });
       }
       return;
     }
 
     if (event.event === "media" && event.media?.payload) {
-      if (state.openaiReady) {
-        sendJson(openaiWs, { type: "input_audio_buffer.append", audio: event.media.payload });
+      const streamSid = event.streamSid || event.media?.streamSid || activeCall?.twilioStreamSid;
+      if (!streamSid) {
+        console.warn("[voice-call] Ignoring media event without StreamSid");
+        return;
+      }
+
+      const call = activeVoiceCalls.getByStreamSid(streamSid);
+      if (!call) {
+        console.warn("[voice-call] Ignoring media for unknown StreamSid", { streamSid });
+        return;
+      }
+
+      if (call.twilioSocket !== twilioWs) {
+        callLog(call, "warn", "Ignoring media delivered on a different Twilio websocket");
+        return;
+      }
+
+      if (call.realtimeSocket?.readyState === WebSocket.OPEN && call.openaiReady) {
+        sendJson(call.realtimeSocket, { type: "input_audio_buffer.append", audio: event.media.payload });
       } else {
-        queuedAudio.push(event.media.payload);
+        call.queuedAudio.push(event.media.payload);
       }
       return;
     }
 
     if (event.event === "stop") {
-      twilioWs.close();
+      const streamSid = event.streamSid || event.stop?.streamSid || activeCall?.twilioStreamSid;
+      const call = streamSid ? activeVoiceCalls.getByStreamSid(streamSid) : activeCall;
+      if (!call) {
+        console.warn("[voice-call] Ignoring stop for unknown StreamSid", { streamSid });
+        return;
+      }
+      await cleanupCall(call, { status: "completed" });
     }
   });
 
-  twilioWs.on("close", async () => {
-    if (state.hangupTimer) {
-      clearTimeout(state.hangupTimer);
-      state.hangupTimer = null;
+  twilioWs.on("error", (error) => {
+    const call = activeCall;
+    if (!call) {
+      console.error("[voice-call] Twilio websocket error before call start", { error: error.message });
+      return;
     }
-    if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close();
-    if (state.businessId && state.callSessionId) {
-      await finishRealtimeCall({
-        allowFallbackLead: !state.finalized,
-        businessId: state.businessId,
-        callSessionId: state.callSessionId,
-        outcome: "Realtime voice call ended.",
-        transcript: state.transcriptParts.join("\n")
-      }).catch((error) => console.error("Could not update call session:", error));
-    }
+    call.failReason = "Twilio media stream failed.";
+    callLog(call, "error", "Twilio websocket error", { error: error.message });
+    void cleanupCall(call, { allowFallbackLead: false, status: "failed", outcome: call.failReason });
+  });
+
+  twilioWs.on("close", () => {
+    void cleanupCall(activeCall, { status: activeCall?.failReason ? "failed" : "completed" });
   });
 }
 
 const server = http.createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ model: OPENAI_MODEL, ok: true, voice: OPENAI_VOICE }));
+    response.end(
+      JSON.stringify({
+        activeCalls: activeCallsByCallSid.size,
+        activeStreams: activeCallsByStreamSid.size,
+        model: OPENAI_MODEL,
+        ok: true,
+        voice: OPENAI_VOICE
+      })
+    );
     return;
   }
 
