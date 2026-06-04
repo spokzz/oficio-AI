@@ -33,6 +33,34 @@ const ownerDataSource = fs.readFileSync(new URL("../lib/owner-data.ts", import.m
 assert.equal(ownerDataSource.includes("tryTranslateOwnerText"), false, "Owner dashboard data loading should not call OpenAI translation");
 assert.equal(ownerDataSource.includes("ownerTranslationConfigured"), false, "Owner dashboard data loading should use cached translations only");
 
+const twilioSource = fs.readFileSync(new URL("../lib/twilio.ts", import.meta.url), "utf8");
+assert.equal(twilioSource.includes("if (!authToken) return true"), false, "Twilio webhook validation must not allow requests when TWILIO_AUTH_TOKEN is missing");
+assert.equal(twilioSource.includes("if (!authToken) return false"), true, "Twilio webhook validation should fail closed when TWILIO_AUTH_TOKEN is missing");
+assert.equal(twilioSource.includes("TWILIO_WEBHOOK_BASE_URL"), true, "Twilio signature validation should support the public webhook URL Twilio called");
+
+for (const route of [
+  "../app/api/twilio/voice/route.ts",
+  "../app/api/twilio/sms/route.ts",
+  "../app/api/twilio/voice/status/route.ts",
+  "../app/api/twilio/voice/screen/route.ts"
+]) {
+  const routeSource = fs.readFileSync(new URL(route, import.meta.url), "utf8");
+  assert.equal(routeSource.includes("validateTwilioSignature"), true, `${route} should validate X-Twilio-Signature`);
+  assert.equal(routeSource.includes("Invalid Twilio signature"), true, `${route} should reject invalid Twilio signatures before webhook logic`);
+}
+
+const twilioVoiceRouteSource = fs.readFileSync(new URL("../app/api/twilio/voice/route.ts", import.meta.url), "utf8");
+assert.equal(twilioVoiceRouteSource.includes("activeAiCallCapacityStatus"), true, "Voice webhooks should enforce per-business active AI call limits");
+
+const twilioSmsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
+assert.equal(twilioSmsRouteSource.includes("reserveTwilioWebhookEvent(params.MessageSid"), true, "SMS webhooks should dedupe Twilio MessageSid before side effects");
+
+const realtimeGatewaySource = fs.readFileSync(new URL("../scripts/voice-realtime-server.mjs", import.meta.url), "utf8");
+assert.equal(realtimeGatewaySource.includes("IDLE_NO_AUDIO_TIMEOUT_MS = Number(process.env.OFICIO_IDLE_NO_AUDIO_TIMEOUT_MS || 15 * 1000)"), true, "Realtime gateway should default no-audio timeout to 15 seconds");
+assert.equal(realtimeGatewaySource.includes("Missing validated call session id"), true, "Realtime gateway should require a call session created by the Twilio voice webhook");
+assert.equal(realtimeGatewaySource.includes("reserve_active_voice_call_lease"), true, "Realtime gateway should reserve a durable slot before opening OpenAI Realtime");
+assert.equal(realtimeGatewaySource.includes("createOpenAiSocket"), true, "Realtime gateway should keep using OpenAI Realtime after safety gates pass");
+
 const registry = createActiveVoiceCallRegistry();
 const callA = { businessId: "business-1", status: "active_with_ana", twilioCallSid: "CA_A", twilioStreamSid: "MS_A" };
 const callB = { businessId: "business-1", status: "active_with_ana", twilioCallSid: "CA_B", twilioStreamSid: "MS_B" };

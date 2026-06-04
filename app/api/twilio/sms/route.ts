@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePhoneCustomer, findBusinessRoutingContext, upsertCallerContact } from "@/lib/call-routing";
 import { normalizePhone } from "@/lib/phone";
-import { parseTwilioForm, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
+import { parseTwilioForm, reserveTwilioWebhookEvent, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
 
 export const runtime = "nodejs";
 
@@ -160,6 +160,11 @@ export async function POST(request: Request) {
 
   if (!validateTwilioSignature(request, params)) {
     return new NextResponse("Invalid Twilio signature.", { status: 403 });
+  }
+
+  const reserved = await reserveTwilioWebhookEvent(params.MessageSid, "sms");
+  if (!reserved) {
+    return twimlResponse("<Response></Response>");
   }
 
   const ownerPhone = normalizePhone(params.From);

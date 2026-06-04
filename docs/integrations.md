@@ -35,6 +35,9 @@ Required voice gateway environment:
 - `OPENAI_REALTIME_VOICE=marin`
 - `OFICIO_VOICE_STREAM_URL=wss://YOUR_GATEWAY/twilio/voice`
 - `OFICIO_VOICE_GATEWAY_PORT=8787` for the local gateway process
+- `OFICIO_MAX_CONCURRENT_AI_CALLS_PER_BUSINESS` optional override; defaults are Basic 1, Premium/Growth 2, VIP 5
+- `OFICIO_IDLE_NO_AUDIO_TIMEOUT_MS` optional override; defaults to 15000
+- `OFICIO_MAX_REALTIME_CALL_DURATION_MS` optional override; defaults to 900000
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `TWILIO_ACCOUNT_SID`

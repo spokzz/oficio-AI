@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type TwilioForm = Record<string, string>;
 
@@ -16,7 +17,7 @@ export async function parseTwilioForm(request: Request): Promise<TwilioForm> {
 
 export function validateTwilioSignature(request: Request, params: TwilioForm) {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!authToken) return true;
+  if (!authToken) return false;
 
   const signature = request.headers.get("x-twilio-signature");
   if (!signature) return false;
@@ -33,6 +34,22 @@ export function validateTwilioSignature(request: Request, params: TwilioForm) {
   const expected = crypto.createHmac("sha1", authToken).update(payload).digest("base64");
 
   return timingSafeEqual(signature, expected);
+}
+
+export async function reserveTwilioWebhookEvent(providerEventId: string | null | undefined, route: string) {
+  const eventId = String(providerEventId ?? "").trim();
+  if (!eventId) return true;
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from("twilio_webhook_events").insert({
+    provider_event_id: eventId,
+    route
+  });
+
+  if (!error) return true;
+  if (error.code === "23505") return false;
+
+  throw new Error(error.message);
 }
 
 function timingSafeEqual(first: string, second: string) {

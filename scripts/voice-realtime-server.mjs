@@ -52,6 +52,13 @@ const OPENAI_TRANSLATION_MODEL = process.env.OPENAI_TRANSLATION_MODEL || "gpt-5.
 const OPENAI_VOICE = process.env.OPENAI_REALTIME_VOICE || "marin";
 const PORT = Number(process.env.OFICIO_VOICE_GATEWAY_PORT || 8787);
 const NEXT_APP_ORIGIN = process.env.OFICIO_NEXT_APP_ORIGIN || "http://localhost:3000";
+const DEFAULT_MAX_ACTIVE_AI_CALLS = {
+  basic: 1,
+  premium: 2,
+  vip: 5
+};
+const IDLE_NO_AUDIO_TIMEOUT_MS = Number(process.env.OFICIO_IDLE_NO_AUDIO_TIMEOUT_MS || 15 * 1000);
+const MAX_REALTIME_CALL_DURATION_MS = Number(process.env.OFICIO_MAX_REALTIME_CALL_DURATION_MS || 15 * 60 * 1000);
 const GEOCODIO_ENDPOINT = "https://api.geocod.io/v1.9/geocode";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const BUSINESS_HOURS_TEXT =
@@ -85,6 +92,20 @@ function normalizePhone(value) {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   return value?.startsWith("+") ? value : `+${digits}`;
+}
+
+function normalizeAiCallPlanKey(planName) {
+  const normalized = String(planName ?? "").trim().toLowerCase();
+  if (normalized.includes("vip")) return "vip";
+  if (normalized.includes("premium") || normalized.includes("growth")) return "premium";
+  return "basic";
+}
+
+function aiConcurrentCallLimit(planName) {
+  const override = Number(process.env.OFICIO_MAX_CONCURRENT_AI_CALLS_PER_BUSINESS);
+  if (Number.isFinite(override) && override > 0) return Math.floor(override);
+
+  return DEFAULT_MAX_ACTIVE_AI_CALLS[normalizeAiCallPlanKey(planName)];
 }
 
 function isServiceOption(value) {
@@ -2431,8 +2452,125 @@ function recordExtractedData(call, toolName, output) {
   call.extractedData[toolName] = [...values, { at: new Date().toISOString(), output }].slice(-10);
 }
 
+class RealtimeCapacityError extends Error {
+  constructor({ activeCalls, limit }) {
+    super(`Concurrent AI call limit reached (${activeCalls}/${limit}).`);
+    this.activeCalls = activeCalls;
+    this.limit = limit;
+  }
+}
+
+async function expireStaleActiveRealtimeCalls({ businessId, supabase }) {
+  const cutoff = new Date(Date.now() - MAX_REALTIME_CALL_DURATION_MS).toISOString();
+  const { error } = await supabase
+    .from("call_sessions")
+    .update({
+      ended_at: new Date().toISOString(),
+      outcome: "Realtime voice call exceeded the maximum duration safety limit.",
+      status: "failed"
+    })
+    .eq("business_id", businessId)
+    .eq("status", "active")
+    .lt("started_at", cutoff);
+
+  if (error) throw new Error(error.message);
+}
+
+async function activeRealtimeCapacityStatus({ businessId, excludeCallSessionId, supabase }) {
+  await expireStaleActiveRealtimeCalls({ businessId, supabase });
+
+  const { data: billing } = await supabase
+    .from("manual_billing_accounts")
+    .select("plan_name")
+    .eq("business_id", businessId)
+    .maybeSingle();
+  const limit = aiConcurrentCallLimit(billing?.plan_name);
+
+  let query = supabase
+    .from("call_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId)
+    .eq("status", "active");
+
+  if (excludeCallSessionId) {
+    query = query.neq("id", excludeCallSessionId);
+  }
+
+  const { count, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const activeCalls = count || 0;
+  return {
+    activeCalls,
+    allowed: activeCalls < limit,
+    limit
+  };
+}
+
+async function reserveRealtimeCallLease({ businessId, callSessionId, limit, supabase, twilioCallSid, twilioStreamSid }) {
+  const expiresAt = new Date(Date.now() + MAX_REALTIME_CALL_DURATION_MS + 60 * 1000).toISOString();
+  const { data, error } = await supabase.rpc("reserve_active_voice_call_lease", {
+    p_business_id: businessId,
+    p_call_session_id: callSessionId,
+    p_expires_at: expiresAt,
+    p_max_active: limit,
+    p_twilio_call_sid: twilioCallSid || null,
+    p_twilio_stream_sid: twilioStreamSid || null
+  });
+
+  if (error) throw new Error(error.message);
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result?.reserved) {
+    throw new RealtimeCapacityError({
+      activeCalls: Number(result?.active_calls ?? limit),
+      limit: Number(result?.max_active ?? limit)
+    });
+  }
+}
+
+async function releaseRealtimeCallLease({ businessId, callSessionId }) {
+  if (!businessId || !callSessionId) return;
+  const { supabase } = await getBusinessContext(businessId);
+  const { error } = await supabase.from("active_voice_call_leases").delete().eq("call_session_id", callSessionId);
+  if (error) throw new Error(error.message);
+}
+
 async function ensureRealtimeCallRecord({ businessId, callSessionId, callerPhone, twilioCallSid, twilioStreamSid }) {
   const { supabase } = await getBusinessContext(businessId);
+  if (!callSessionId) {
+    throw new Error("Missing validated call session id.");
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("call_sessions")
+    .select("id,business_id,provider_call_id,status")
+    .eq("id", callSessionId)
+    .eq("business_id", businessId)
+    .maybeSingle();
+
+  if (existingError) throw new Error(existingError.message);
+  if (!existing) throw new Error("Call session was not created by the Twilio voice webhook.");
+  if (existing.provider_call_id && twilioCallSid && existing.provider_call_id !== twilioCallSid) {
+    throw new Error("Twilio CallSid does not match the validated call session.");
+  }
+  if (existing.status !== "active") {
+    throw new Error(`Call session is not active (${existing.status}).`);
+  }
+
+  const capacity = await activeRealtimeCapacityStatus({ businessId, excludeCallSessionId: callSessionId, supabase });
+  if (!capacity.allowed) {
+    throw new RealtimeCapacityError(capacity);
+  }
+  await reserveRealtimeCallLease({
+    businessId,
+    callSessionId,
+    limit: capacity.limit,
+    supabase,
+    twilioCallSid,
+    twilioStreamSid
+  });
+
   const values = {
     status: "active"
   };
@@ -2440,42 +2578,9 @@ async function ensureRealtimeCallRecord({ businessId, callSessionId, callerPhone
   if (twilioCallSid) values.provider_call_id = twilioCallSid;
   if (twilioStreamSid) values.twilio_stream_sid = twilioStreamSid;
 
-  if (callSessionId) {
-    const { error } = await supabase.from("call_sessions").update(values).eq("id", callSessionId);
-    if (error) throw new Error(error.message);
-    return callSessionId;
-  }
-
-  if (twilioCallSid) {
-    const { data: existing, error } = await supabase
-      .from("call_sessions")
-      .select("id")
-      .eq("provider_call_id", twilioCallSid)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (existing?.id) {
-      const { error: updateError } = await supabase.from("call_sessions").update(values).eq("id", existing.id);
-      if (updateError) throw new Error(updateError.message);
-      return existing.id;
-    }
-  }
-
-  const { data, error } = await supabase
-    .from("call_sessions")
-    .insert({
-      business_id: businessId,
-      contact_type: "unknown",
-      from_phone: normalizePhone(callerPhone),
-      provider_call_id: twilioCallSid || null,
-      screening_result: "realtime_stream_started",
-      status: "active",
-      twilio_stream_sid: twilioStreamSid || null
-    })
-    .select("id")
-    .single();
-
+  const { error } = await supabase.from("call_sessions").update(values).eq("id", callSessionId);
   if (error) throw new Error(error.message);
-  return data.id;
+  return callSessionId;
 }
 
 async function handleToolCall({ call, state, openaiWs, twilioWs }) {
@@ -2603,16 +2708,62 @@ async function configureRealtimeSession(openaiWs, state) {
 function handleTwilioConnection(twilioWs) {
   let activeCall = null;
 
+  function clearCallTimers(call) {
+    if (call?.hangupTimer) {
+      clearTimeout(call.hangupTimer);
+      call.hangupTimer = null;
+    }
+    if (call?.idleNoAudioTimer) {
+      clearTimeout(call.idleNoAudioTimer);
+      call.idleNoAudioTimer = null;
+    }
+    if (call?.maxDurationTimer) {
+      clearTimeout(call.maxDurationTimer);
+      call.maxDurationTimer = null;
+    }
+  }
+
+  function resetIdleNoAudioTimer(call) {
+    if (!call || call.cleanupStarted || !(IDLE_NO_AUDIO_TIMEOUT_MS > 0)) return;
+    if (call.idleNoAudioTimer) clearTimeout(call.idleNoAudioTimer);
+
+    call.idleNoAudioTimer = setTimeout(async () => {
+      call.idleNoAudioTimer = null;
+      if (call.cleanupStarted) return;
+      const outcome = `Realtime voice call ended after ${Math.round(IDLE_NO_AUDIO_TIMEOUT_MS / 1000)} seconds without inbound audio.`;
+      call.failReason = outcome;
+      callLog(call, "warn", "Closing idle realtime call with no inbound audio");
+      await redirectLiveCallToTwiml({
+        callSid: call.callSid,
+        twiml: "<Response><Hangup /></Response>"
+      }).catch((error) => callLog(call, "error", "Could not hang up idle call", { error: error.message }));
+      await cleanupCall(call, { allowFallbackLead: false, closeTwilio: true, status: "failed", outcome });
+    }, IDLE_NO_AUDIO_TIMEOUT_MS);
+  }
+
+  function startMaxDurationTimer(call) {
+    if (!call || call.cleanupStarted || !(MAX_REALTIME_CALL_DURATION_MS > 0) || call.maxDurationTimer) return;
+
+    call.maxDurationTimer = setTimeout(async () => {
+      call.maxDurationTimer = null;
+      if (call.cleanupStarted) return;
+      const outcome = "Realtime voice call exceeded the maximum duration safety limit.";
+      call.failReason = outcome;
+      callLog(call, "warn", "Closing realtime call at maximum duration");
+      await redirectLiveCallToTwiml({
+        callSid: call.callSid,
+        twiml: "<Response><Hangup /></Response>"
+      }).catch((error) => callLog(call, "error", "Could not hang up max-duration call", { error: error.message }));
+      await cleanupCall(call, { closeTwilio: true, status: "failed", outcome });
+    }, MAX_REALTIME_CALL_DURATION_MS);
+  }
+
   async function cleanupCall(call, options = {}) {
     if (!call || call.cleanupStarted) return;
     call.cleanupStarted = true;
     call.status = options.status || (call.failReason ? "failed" : "completed");
     activeVoiceCalls.remove(call);
-
-    if (call.hangupTimer) {
-      clearTimeout(call.hangupTimer);
-      call.hangupTimer = null;
-    }
+    clearCallTimers(call);
 
     if (options.closeRealtime !== false && call.realtimeSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(call.realtimeSocket.readyState)) {
       call.realtimeSocket.close();
@@ -2632,6 +2783,11 @@ function handleTwilioConnection(twilioWs) {
         status: call.status,
         transcript: transcriptText(call)
       }).catch((error) => callLog(call, "error", "Could not update call session", { error: error.message }));
+
+      await releaseRealtimeCallLease({
+        businessId: call.businessId,
+        callSessionId: call.callSessionId
+      }).catch((error) => callLog(call, "error", "Could not release active call lease", { error: error.message }));
     }
 
     callLog(call, call.status === "failed" ? "warn" : "log", "Cleaned up realtime voice call");
@@ -2809,7 +2965,6 @@ function handleTwilioConnection(twilioWs) {
         return;
       }
 
-      // TODO: Enforce max_simultaneous_ai_calls here if plan settings add a per-business concurrent-call limit.
       activeCall = activeVoiceCalls.add({
         business: null,
         businessId,
@@ -2823,7 +2978,9 @@ function handleTwilioConnection(twilioWs) {
         fromPhone: callerPhone,
         greeted: false,
         hangupTimer: null,
+        idleNoAudioTimer: null,
         knownCustomer: null,
+        maxDurationTimer: null,
         openaiReady: false,
         pendingHangup: false,
         queuedAudio: [],
@@ -2840,6 +2997,8 @@ function handleTwilioConnection(twilioWs) {
         twilioStreamSid
       });
       callLog(activeCall, "log", "Twilio stream started");
+      resetIdleNoAudioTimer(activeCall);
+      startMaxDurationTimer(activeCall);
 
       try {
         callSessionId = await ensureRealtimeCallRecord({
@@ -2853,8 +3012,17 @@ function handleTwilioConnection(twilioWs) {
         activeCall.callSessionId = callSessionId;
         startOpenAiForCall(activeCall);
       } catch (error) {
-        activeCall.failReason = "Could not prepare Ana for this call.";
+        activeCall.failReason =
+          error instanceof RealtimeCapacityError
+            ? "Sorry, Ana is already helping another caller. Please try again in a few minutes."
+            : "Could not prepare Ana for this call.";
         callLog(activeCall, "error", "Could not create or update Supabase call record", { error: error.message });
+        if (error instanceof RealtimeCapacityError) {
+          await redirectLiveCallToTwiml({
+            callSid: activeCall.callSid,
+            twiml: `<Response><Say voice="Polly.Joanna" language="en-US">${xmlEscape(activeCall.failReason)}</Say><Hangup /></Response>`
+          }).catch((redirectError) => callLog(activeCall, "error", "Could not redirect over-capacity call", { error: redirectError.message }));
+        }
         await cleanupCall(activeCall, { allowFallbackLead: false, closeTwilio: true, status: "failed", outcome: activeCall.failReason });
       }
       return;
@@ -2877,6 +3045,8 @@ function handleTwilioConnection(twilioWs) {
         callLog(call, "warn", "Ignoring media delivered on a different Twilio websocket");
         return;
       }
+
+      resetIdleNoAudioTimer(call);
 
       if (call.realtimeSocket?.readyState === WebSocket.OPEN && call.openaiReady) {
         sendJson(call.realtimeSocket, { type: "input_audio_buffer.append", audio: event.media.payload });

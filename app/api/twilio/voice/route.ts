@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  activeAiCallCapacityStatus,
   aiCallAllowanceStatus,
   businessFlowTwiml,
   businessScreeningPrompt,
@@ -73,6 +74,23 @@ export async function POST(request: Request) {
     });
 
     return twimlResponse(sayAndHangup("Sorry, this business is not accepting AI receptionist calls right now. Please try again later."));
+  }
+
+  const capacityStatus = await activeAiCallCapacityStatus(context.business.id);
+  if (!capacityStatus.allowed) {
+    await createCallSession({
+      businessId: context.business.id,
+      contactType: knownCaller.classification,
+      customerId: knownCaller.customerId,
+      fromPhone: params.From,
+      outcome: `Concurrent AI call limit reached (${capacityStatus.activeCalls}/${capacityStatus.limit}).`,
+      providerCallId: params.CallSid,
+      screeningResult: "concurrent_ai_call_limit_reached",
+      status: "completed",
+      toPhone: params.To
+    });
+
+    return twimlResponse(sayAndHangup("Sorry, Ana is already helping another caller. Please try again in a few minutes."));
   }
 
   if (knownCaller.classification === "customer") {

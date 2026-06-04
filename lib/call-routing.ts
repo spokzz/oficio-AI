@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildAiCallUsage, monthWindow, sumUsageMinutes } from "@/lib/call-usage";
+import { buildAiCallUsage, monthWindow, normalizeAiCallPlan, sumUsageMinutes } from "@/lib/call-usage";
 import { normalizePhone, phoneSearchValues } from "@/lib/phone";
 import { xmlEscape } from "@/lib/twilio";
 
@@ -34,6 +34,74 @@ export type KnownCaller = {
   customerId: string | null;
   displayName: string | null;
 };
+
+const DEFAULT_MAX_ACTIVE_AI_CALLS = {
+  basic: 1,
+  premium: 2,
+  vip: 5
+} as const;
+const MAX_REALTIME_CALL_DURATION_MS = Number(process.env.OFICIO_MAX_REALTIME_CALL_DURATION_MS ?? 15 * 60 * 1000);
+
+export function aiConcurrentCallLimit(planName?: string | null) {
+  const override = Number(process.env.OFICIO_MAX_CONCURRENT_AI_CALLS_PER_BUSINESS);
+  if (Number.isFinite(override) && override > 0) return Math.floor(override);
+
+  return DEFAULT_MAX_ACTIVE_AI_CALLS[normalizeAiCallPlan(planName).key];
+}
+
+export async function expireStaleActiveAiCalls(businessId: string) {
+  const cutoff = new Date(Date.now() - MAX_REALTIME_CALL_DURATION_MS).toISOString();
+  const supabase = createAdminClient();
+
+  const { error } = await supabase
+    .from("call_sessions")
+    .update({
+      ended_at: new Date().toISOString(),
+      outcome: "Realtime voice call exceeded the maximum duration safety limit.",
+      status: "failed"
+    })
+    .eq("business_id", businessId)
+    .eq("status", "active")
+    .lt("started_at", cutoff);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function activeAiCallCapacityStatus(businessId: string, excludeCallSessionId?: string | null) {
+  const supabase = createAdminClient();
+  await expireStaleActiveAiCalls(businessId);
+
+  const { data: billing } = await supabase
+    .from("manual_billing_accounts")
+    .select("plan_name")
+    .eq("business_id", businessId)
+    .maybeSingle<{ plan_name: string | null }>();
+  const limit = aiConcurrentCallLimit(billing?.plan_name);
+
+  let query = supabase
+    .from("call_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId)
+    .eq("status", "active");
+
+  if (excludeCallSessionId) {
+    query = query.neq("id", excludeCallSessionId);
+  }
+
+  const { count, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const activeCalls = count ?? 0;
+  return {
+    activeCalls,
+    allowed: activeCalls < limit,
+    limit
+  };
+}
 
 export async function aiCallAllowanceStatus(businessId: string) {
   const supabase = createAdminClient();
