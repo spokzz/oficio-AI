@@ -7,6 +7,7 @@ import { isServiceOption, serviceOptionDefaults } from "@/lib/services";
 import { normalizePhone } from "@/lib/phone";
 import { geocodeAddress } from "@/lib/geocoding";
 import type { ContactClassification } from "@/lib/types";
+import { validateCurrentUserCsrfToken, validateFormCsrfToken } from "@/lib/csrf";
 
 export type AddCustomerState = {
   error?: string;
@@ -198,6 +199,9 @@ async function bookingClosureError({
 }
 
 export async function updateOwnerSettings(_state: OwnerSettingsState, formData: FormData): Promise<OwnerSettingsState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const ownerSummaryLanguage = String(formData.get("ownerSummaryLanguage") ?? "en");
   const ownerSummaryChannel = String(formData.get("ownerSummaryChannel") ?? "sms");
   const bookingTimeZone = String(formData.get("bookingTimeZone") ?? "America/Chicago").trim();
@@ -253,6 +257,9 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
 }
 
 export async function updateOwnerServiceArea(_state: OwnerServiceAreaState, formData: FormData): Promise<OwnerServiceAreaState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const baseAddress = String(formData.get("baseAddress") ?? "").trim();
   const radiusMiles = Number(formData.get("radiusMiles") ?? 30);
   const allowOutsideRadius = String(formData.get("allowOutsideRadius") ?? "false") === "true";
@@ -323,6 +330,9 @@ export async function updateOwnerServiceArea(_state: OwnerServiceAreaState, form
 }
 
 export async function addOwnerAvailabilityException(_state: OwnerClosureState, formData: FormData): Promise<OwnerClosureState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const title = String(formData.get("title") ?? "Closed").replace(/\s+/g, " ").trim();
   const startsOn = String(formData.get("startsOn") ?? "").trim();
   const endsOn = String(formData.get("endsOn") ?? "").trim();
@@ -366,7 +376,10 @@ export async function addOwnerAvailabilityException(_state: OwnerClosureState, f
   return { success: "Closed dates saved." };
 }
 
-export async function deleteOwnerAvailabilityException(exceptionId: string): Promise<OwnerClosureState> {
+export async function deleteOwnerAvailabilityException(exceptionId: string, csrfToken: string): Promise<OwnerClosureState> {
+  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
+  if (csrfError) return { error: csrfError };
+
   const trimmedExceptionId = exceptionId.trim();
 
   if (!trimmedExceptionId) {
@@ -537,6 +550,9 @@ function bookingInput(formData: FormData, { allowLead = false } = {}) {
 }
 
 export async function addOwnerBooking(_state: AddBookingState, formData: FormData): Promise<AddBookingState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const input = bookingInput(formData);
   if ("error" in input) {
     return input;
@@ -639,6 +655,9 @@ export async function addOwnerBooking(_state: AddBookingState, formData: FormDat
 }
 
 export async function updateOwnerBooking(_state: AddBookingState, formData: FormData): Promise<AddBookingState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const bookingId = String(formData.get("bookingId") ?? "").trim();
   const input = bookingInput(formData, { allowLead: true });
 
@@ -717,7 +736,10 @@ export async function updateOwnerBooking(_state: AddBookingState, formData: Form
   return { success: `${String(customer.full_name ?? "Booking")} was updated.` };
 }
 
-export async function deleteOwnerBooking(bookingId: string): Promise<AddBookingState> {
+export async function deleteOwnerBooking(bookingId: string, csrfToken: string): Promise<AddBookingState> {
+  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
+  if (csrfError) return { error: csrfError };
+
   const trimmedBookingId = bookingId.trim();
 
   if (!trimmedBookingId) {
@@ -756,6 +778,9 @@ export async function deleteOwnerBooking(bookingId: string): Promise<AddBookingS
 }
 
 export async function addOwnerCustomer(_state: AddCustomerState, formData: FormData): Promise<AddCustomerState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const input = customerInput(formData);
   if ("error" in input) {
     return input;
@@ -814,6 +839,9 @@ export async function addOwnerCustomer(_state: AddCustomerState, formData: FormD
 }
 
 export async function updateOwnerCustomer(_state: AddCustomerState, formData: FormData): Promise<AddCustomerState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const customerId = String(formData.get("customerId") ?? "").trim();
   const input = customerInput(formData);
 
@@ -878,7 +906,10 @@ export async function updateOwnerCustomer(_state: AddCustomerState, formData: Fo
   return { success: `${input.fullName} was updated.` };
 }
 
-export async function deleteOwnerCustomer(customerId: string): Promise<AddCustomerState> {
+export async function deleteOwnerCustomer(customerId: string, csrfToken: string): Promise<AddCustomerState> {
+  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
+  if (csrfError) return { error: csrfError };
+
   const trimmedCustomerId = customerId.trim();
 
   if (!trimmedCustomerId) {
@@ -916,7 +947,10 @@ export async function deleteOwnerCustomer(customerId: string): Promise<AddCustom
   return { success: `${customer?.full_name ?? "Customer"} was deleted.` };
 }
 
-export async function markOwnerRecentCall(callSessionId: string, classification: ContactClassification): Promise<MarkCallState> {
+export async function markOwnerRecentCall(callSessionId: string, classification: ContactClassification, csrfToken: string): Promise<MarkCallState> {
+  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
+  if (csrfError) return { error: csrfError };
+
   const trimmedCallSessionId = callSessionId.trim();
 
   if (!trimmedCallSessionId) {

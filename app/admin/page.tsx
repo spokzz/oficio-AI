@@ -1,6 +1,7 @@
 import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { PortalShell } from "@/components/layout/portal-shell";
 import { getAdminPortalData } from "@/lib/admin-data";
+import { createCsrfToken } from "@/lib/csrf";
 import type { AdminTab } from "@/components/admin/admin-dashboard";
 
 const adminTabs: Array<{ tab: AdminTab; label: string; href: string }> = [
@@ -27,6 +28,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const data = await getAdminPortalData();
   const params = await searchParams;
   const activeTab = getAdminTab(params?.tab);
+  const csrfToken = createCsrfToken(data.user.id);
 
   return (
     <PortalShell
@@ -42,7 +44,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       subtitle="Set up owners, monitor accounts, tune AI behavior, and track manual billing."
       title={`Welcome, ${data.user.full_name?.split(" ")[0] ?? "Admin"}`}
     >
-      <AdminDashboard activeTab={activeTab} data={data} />
+      <AdminDashboard activeTab={activeTab} csrfToken={csrfToken} data={data} />
     </PortalShell>
   );
 }

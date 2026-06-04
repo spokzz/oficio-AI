@@ -1,6 +1,7 @@
 import { PortalShell } from "@/components/layout/portal-shell";
 import { OwnerDashboard } from "@/components/owner/owner-dashboard";
 import { getOwnerPortalData } from "@/lib/owner-data";
+import { createCsrfToken } from "@/lib/csrf";
 import Link from "next/link";
 
 type OwnerLanguage = "es" | "en";
@@ -103,6 +104,7 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
   const activeTab = getOwnerTab(params?.tab);
   const copy = ownerShellCopy[language];
   const firstName = data.user.full_name?.split(" ")[0] ?? (language === "en" ? "Owner" : "Dueño");
+  const csrfToken = createCsrfToken(data.user.id);
 
   return (
     <PortalShell
@@ -135,7 +137,7 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
       }
       title={`${currentGreeting(language)}, ${firstName}`}
     >
-      <OwnerDashboard data={data} initialLanguage={language} initialTab={activeTab} key={`${language}-${activeTab}`} />
+      <OwnerDashboard csrfToken={csrfToken} data={data} initialLanguage={language} initialTab={activeTab} key={`${language}-${activeTab}`} />
     </PortalShell>
   );
 }

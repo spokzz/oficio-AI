@@ -18,6 +18,16 @@ function messageTwiml(message: string) {
   return `<Response><Message>${xmlEscape(message)}</Message></Response>`;
 }
 
+function validCustomerConfirmationSms(body: string) {
+  const compact = body.replace(/\s+/g, " ").trim();
+  if (!compact || compact.length > 500) return false;
+  if (!/^Hi\b/i.test(compact)) return false;
+  if (!/\bappointment is confirmed for\b/i.test(compact)) return false;
+  if (!/\bReply here if you need to update it\.$/i.test(compact)) return false;
+  if (/\b(api key|system prompt|developer message|internal instructions|owner private notes|ignore instructions)\b/i.test(compact)) return false;
+  return true;
+}
+
 function forwardedMessage(body: string) {
   const match = body.trim().match(/^FWD\s+(\+?\d[\d\s().-]{7,})\s*\n?([\s\S]+)$/i);
   if (!match) return null;
@@ -104,6 +114,20 @@ async function handleOwnerBookingConfirmation({
   const customerPhone = normalizePhone(confirmation.customer_phone);
 
   if (customerPhone) {
+    if (!validCustomerConfirmationSms(confirmation.customer_confirmation_body)) {
+      await supabase
+        .from("owner_booking_confirmations")
+        .update({
+          answered_at: now,
+          error_message: "Customer confirmation SMS failed template validation.",
+          owner_response: "yes_approve",
+          status: "failed"
+        })
+        .eq("id", confirmation.id);
+
+      return twimlResponse(messageTwiml("Booking approved, but Ana could not text the customer because the message template was invalid. Please follow up manually."));
+    }
+
     try {
       const sent = await sendTwilioSms({
         body: confirmation.customer_confirmation_body,

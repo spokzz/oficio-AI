@@ -7,6 +7,7 @@ import { normalizePhone } from "@/lib/phone";
 import { isServiceOption, serviceOptionDefaults } from "@/lib/services";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { validateCurrentUserCsrfToken, validateFormCsrfToken } from "@/lib/csrf";
 
 type OnboardingState = {
   error?: string;
@@ -83,6 +84,9 @@ async function requirePlatformAdmin() {
 }
 
 export async function onboardOwner(_state: OnboardingState, formData: FormData): Promise<OnboardingState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const businessName = String(formData.get("businessName") ?? "").trim();
   const ownerName = String(formData.get("ownerName") ?? "").trim();
   const ownerEmail = String(formData.get("ownerEmail") ?? "").trim().toLowerCase();
@@ -309,6 +313,9 @@ export async function onboardOwner(_state: OnboardingState, formData: FormData):
 }
 
 export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData: FormData): Promise<PhoneSetupState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const businessId = String(formData.get("businessId") ?? "").trim();
   const phoneSetupMode = String(formData.get("phoneSetupMode") ?? "");
   const voiceSetupStatus = String(formData.get("voiceSetupStatus") ?? "");
@@ -434,6 +441,9 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
 }
 
 export async function updateAdminBusinessName(_state: InlineEditState, formData: FormData): Promise<InlineEditState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const businessId = String(formData.get("businessId") ?? "").trim();
   const businessName = String(formData.get("businessName") ?? "").trim();
 
@@ -463,6 +473,9 @@ export async function updateAdminBusinessName(_state: InlineEditState, formData:
 }
 
 export async function updateAdminOwnerName(_state: InlineEditState, formData: FormData): Promise<InlineEditState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const ownerId = String(formData.get("ownerId") ?? "").trim();
   const ownerName = String(formData.get("ownerName") ?? "").trim();
 
@@ -492,6 +505,9 @@ export async function updateAdminOwnerName(_state: InlineEditState, formData: Fo
 }
 
 export async function updateAdminAccount(_state: AdminAccountState, formData: FormData): Promise<AdminAccountState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const businessId = String(formData.get("businessId") ?? "").trim();
   const businessName = String(formData.get("businessName") ?? "").trim();
   const ownerId = String(formData.get("ownerId") ?? "").trim();
@@ -648,7 +664,10 @@ export async function updateAdminAccount(_state: AdminAccountState, formData: Fo
   return { success: "Account saved." };
 }
 
-export async function deleteAdminAccount(businessId: string): Promise<AdminAccountState> {
+export async function deleteAdminAccount(businessId: string, csrfToken: string): Promise<AdminAccountState> {
+  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
+  if (csrfError) return { error: csrfError };
+
   const trimmedBusinessId = businessId.trim();
   if (!trimmedBusinessId) return { error: "Business id is required." };
 
@@ -672,6 +691,9 @@ export async function deleteAdminAccount(businessId: string): Promise<AdminAccou
 }
 
 export async function addAdminAvailabilityException(_state: AdminAccountState, formData: FormData): Promise<AdminAccountState> {
+  const csrfError = await validateFormCsrfToken(formData);
+  if (csrfError) return { error: csrfError };
+
   const businessId = String(formData.get("businessId") ?? "").trim();
   const title = String(formData.get("title") ?? "Closed").replace(/\s+/g, " ").trim();
   const startsOn = String(formData.get("startsOn") ?? "").trim();
@@ -702,7 +724,10 @@ export async function addAdminAvailabilityException(_state: AdminAccountState, f
   return { success: "Closed dates saved." };
 }
 
-export async function deleteAdminAvailabilityException(exceptionId: string): Promise<AdminAccountState> {
+export async function deleteAdminAvailabilityException(exceptionId: string, csrfToken: string): Promise<AdminAccountState> {
+  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
+  if (csrfError) return { error: csrfError };
+
   const trimmedExceptionId = exceptionId.trim();
   if (!trimmedExceptionId) return { error: "Closure id is required." };
 

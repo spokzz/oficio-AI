@@ -50,6 +50,7 @@ type Lang = "es" | "en";
 type BookingView = "current" | "past" | "leads";
 type CustomerSort = "asc" | "desc";
 
+const CSRF_FIELD_NAME = "csrfToken";
 const DAY_MS = 86_400_000;
 const timeZoneOptions = [
   "America/New_York",
@@ -1017,11 +1018,17 @@ function Toast({ message }: { message: string | null }) {
   return message ? <div className="toast show">{message}</div> : null;
 }
 
+function CsrfField({ token }: { token: string }) {
+  return <input name={CSRF_FIELD_NAME} type="hidden" value={token} />;
+}
+
 export function OwnerDashboard({
+  csrfToken,
   data,
   initialLanguage = "es",
   initialTab = "home"
 }: {
+  csrfToken: string;
   data: OwnerPortalData;
   initialLanguage?: Lang;
   initialTab?: Tab;
@@ -1171,7 +1178,7 @@ export function OwnerDashboard({
       }
 
       startDeleteTransition(async () => {
-        const result = await deleteOwnerBooking(booking.id);
+        const result = await deleteOwnerBooking(booking.id, csrfToken);
 
         if (result.error) {
           showToast(result.error);
@@ -1184,7 +1191,7 @@ export function OwnerDashboard({
         router.refresh();
       });
     },
-    [router, showToast, t.bookingDeleted, t.confirmDeleteBooking]
+    [csrfToken, router, showToast, t.bookingDeleted, t.confirmDeleteBooking]
   );
 
   const handleCustomerDeleted = useCallback(
@@ -1194,7 +1201,7 @@ export function OwnerDashboard({
       }
 
       startDeleteTransition(async () => {
-        const result = await deleteOwnerCustomer(customer.id);
+        const result = await deleteOwnerCustomer(customer.id, csrfToken);
 
         if (result.error) {
           showToast(result.error);
@@ -1207,7 +1214,7 @@ export function OwnerDashboard({
         router.refresh();
       });
     },
-    [router, showToast, t.confirmDeleteCustomer, t.customerDeleted]
+    [csrfToken, router, showToast, t.confirmDeleteCustomer, t.customerDeleted]
   );
 
   return (
@@ -1347,10 +1354,11 @@ export function OwnerDashboard({
       ) : null}
       {activeTab === "quotes" ? <QuotesTab labels={t} quotes={data.quotes} onAction={() => showToast(t.actionSent)} /> : null}
       {activeTab === "messages" ? <MessagesTab data={data} labels={t} /> : null}
-      {activeTab === "settings" ? <SettingsTab data={data} labels={t} onSaved={showToast} /> : null}
+      {activeTab === "settings" ? <SettingsTab csrfToken={csrfToken} data={data} labels={t} onSaved={showToast} /> : null}
       {isBookingModalOpen ? (
         <AddBookingModal
           customers={data.customers}
+          csrfToken={csrfToken}
           labels={t}
           onClose={() => setIsBookingModalOpen(false)}
           onSuccess={handleBookingAdded}
@@ -1371,13 +1379,14 @@ export function OwnerDashboard({
         <EditBookingModal
           booking={editBooking}
           customers={data.customers}
+          csrfToken={csrfToken}
           labels={t}
           onClose={() => setEditBooking(null)}
           onSuccess={handleBookingAdded}
         />
       ) : null}
       {isCustomerModalOpen ? (
-        <AddCustomerModal labels={t} onClose={() => setIsCustomerModalOpen(false)} onSuccess={handleCustomerAdded} />
+        <AddCustomerModal csrfToken={csrfToken} labels={t} onClose={() => setIsCustomerModalOpen(false)} onSuccess={handleCustomerAdded} />
       ) : null}
       {detailCustomer ? (
         <CustomerDetailsModal
@@ -1395,6 +1404,7 @@ export function OwnerDashboard({
       {editCustomer ? (
         <EditCustomerModal
           customer={editCustomer}
+          csrfToken={csrfToken}
           labels={t}
           onClose={() => setEditCustomer(null)}
           onSuccess={handleCustomerAdded}
@@ -1766,10 +1776,12 @@ function BusinessHoursDropdowns({ initialText, labels }: { initialText?: string 
 }
 
 function AvailabilityExceptionsForm({
+  csrfToken,
   exceptions,
   labels,
   onSaved
 }: {
+  csrfToken: string;
   exceptions: OwnerPortalData["availabilityExceptions"];
   labels: OwnerCopy;
   onSaved: (message: string) => void;
@@ -1790,7 +1802,7 @@ function AvailabilityExceptionsForm({
       if (!window.confirm(labels.confirmDeleteClosure)) return;
 
       startDeleteTransition(async () => {
-        const result = await deleteOwnerAvailabilityException(exceptionId);
+        const result = await deleteOwnerAvailabilityException(exceptionId, csrfToken);
         if (result.error) {
           onSaved(result.error);
           return;
@@ -1800,7 +1812,7 @@ function AvailabilityExceptionsForm({
         router.refresh();
       });
     },
-    [labels.closureDeleted, labels.confirmDeleteClosure, onSaved, router]
+    [csrfToken, labels.closureDeleted, labels.confirmDeleteClosure, onSaved, router]
   );
 
   return (
@@ -1812,6 +1824,7 @@ function AvailabilityExceptionsForm({
         </div>
       </div>
       <form action={formAction} className="availability-closure-form">
+        <CsrfField token={csrfToken} />
         <label className="field">
           <span>{labels.closureReason}</span>
           <input defaultValue="Vacation" maxLength={80} name="title" required />
@@ -1871,10 +1884,12 @@ function AvailabilityExceptionsForm({
 
 function SummarySettingsForm({
   business,
+  csrfToken,
   labels,
   onSaved
 }: {
   business: OwnerPortalData["business"];
+  csrfToken: string;
   labels: OwnerCopy;
   onSaved: (message: string) => void;
 }) {
@@ -1896,6 +1911,7 @@ function SummarySettingsForm({
         </div>
       </div>
       <form action={formAction}>
+        <CsrfField token={csrfToken} />
         <div className="form-grid">
           <label className="field">
             <span>{labels.summaryLanguage}</span>
@@ -1940,10 +1956,12 @@ function SummarySettingsForm({
 }
 
 function ServiceAreaSettingsForm({
+  csrfToken,
   data,
   labels,
   onSaved
 }: {
+  csrfToken: string;
   data: OwnerPortalData;
   labels: OwnerCopy;
   onSaved: (message: string) => void;
@@ -1967,6 +1985,7 @@ function ServiceAreaSettingsForm({
         </div>
       </div>
       <form action={formAction}>
+        <CsrfField token={csrfToken} />
         <div className="service-area-fields">
           <AddressLookupInput
             className="full"
@@ -2001,12 +2020,12 @@ function ServiceAreaSettingsForm({
   );
 }
 
-function SettingsTab({ data, labels, onSaved }: { data: OwnerPortalData; labels: OwnerCopy; onSaved: (message: string) => void }) {
+function SettingsTab({ csrfToken, data, labels, onSaved }: { csrfToken: string; data: OwnerPortalData; labels: OwnerCopy; onSaved: (message: string) => void }) {
   return (
     <div className="grid">
-      <AvailabilityExceptionsForm exceptions={data.availabilityExceptions} labels={labels} onSaved={onSaved} />
-      <ServiceAreaSettingsForm data={data} labels={labels} onSaved={onSaved} />
-      <SummarySettingsForm business={data.business} labels={labels} onSaved={onSaved} />
+      <AvailabilityExceptionsForm csrfToken={csrfToken} exceptions={data.availabilityExceptions} labels={labels} onSaved={onSaved} />
+      <ServiceAreaSettingsForm csrfToken={csrfToken} data={data} labels={labels} onSaved={onSaved} />
+      <SummarySettingsForm business={data.business} csrfToken={csrfToken} labels={labels} onSaved={onSaved} />
       <PhoneSetupCard data={data} labels={labels} />
     </div>
   );
@@ -2594,10 +2613,12 @@ function CustomerDetailsModal({
 }
 
 function AddCustomerModal({
+  csrfToken,
   labels,
   onClose,
   onSuccess
 }: {
+  csrfToken: string;
   labels: OwnerCopy;
   onClose: () => void;
   onSuccess: (message: string) => void;
@@ -2630,6 +2651,7 @@ function AddCustomerModal({
           </button>
         </div>
         <form action={formAction} className="form-grid">
+          <CsrfField token={csrfToken} />
           <label className="field">
             <span>{labels.fullName}</span>
             <input autoFocus name="fullName" required />
@@ -2705,11 +2727,13 @@ function AddCustomerModal({
 
 function AddBookingModal({
   customers,
+  csrfToken,
   labels,
   onClose,
   onSuccess
 }: {
   customers: OwnerPortalData["customers"];
+  csrfToken: string;
   labels: OwnerCopy;
   onClose: () => void;
   onSuccess: (message: string) => void;
@@ -2744,6 +2768,7 @@ function AddBookingModal({
           </button>
         </div>
         <form action={formAction} className="form-grid">
+          <CsrfField token={csrfToken} />
           <label className="field">
             <span>{labels.chooseCustomer}</span>
             <select name="customerId" onChange={(event) => setSelectedCustomerId(event.target.value)} value={selectedCustomerId}>
@@ -2879,12 +2904,14 @@ function BookingDetailsModal({
 function EditBookingModal({
   booking,
   customers,
+  csrfToken,
   labels,
   onClose,
   onSuccess
 }: {
   booking: Job;
   customers: OwnerPortalData["customers"];
+  csrfToken: string;
   labels: OwnerCopy;
   onClose: () => void;
   onSuccess: (message: string) => void;
@@ -2921,6 +2948,7 @@ function EditBookingModal({
           </button>
         </div>
         <form action={formAction} className="form-grid">
+          <CsrfField token={csrfToken} />
           <input name="bookingId" type="hidden" value={booking.id} />
           <label className="field">
             <span>{labels.status}</span>
@@ -2997,12 +3025,14 @@ function EditBookingModal({
 
 function EditCustomerModal({
   customer,
+  csrfToken,
   labels,
   onClose,
   onSuccess,
   service
 }: {
   customer: Customer;
+  csrfToken: string;
   labels: OwnerCopy;
   onClose: () => void;
   onSuccess: (message: string) => void;
@@ -3041,6 +3071,7 @@ function EditCustomerModal({
           </button>
         </div>
         <form action={formAction} className="form-grid">
+          <CsrfField token={csrfToken} />
           <input name="customerId" type="hidden" value={customer.id} />
           <label className="field">
             <span>{labels.fullName}</span>

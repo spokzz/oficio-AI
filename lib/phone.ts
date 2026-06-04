@@ -24,8 +24,7 @@ export function normalizePhone(phone: string | null | undefined) {
 
 export function phoneSearchValues(phone: string | null | undefined) {
   const normalized = normalizePhone(phone);
-  const raw = phone?.trim();
-  return Array.from(new Set([normalized, raw].filter((value): value is string => Boolean(value))));
+  return normalized ? [normalized] : [];
 }
 
 export function formatPhone(phone: string | null | undefined) {

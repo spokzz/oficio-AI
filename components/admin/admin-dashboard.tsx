@@ -25,6 +25,7 @@ import type { ExistingNumberKind, PhoneSetupMode, SmsSetupStatus, VoiceSetupStat
 
 export type AdminTab = "overview" | "onboarding" | "accounts" | "phone" | "usage" | "billing" | "playbook";
 
+const CSRF_FIELD_NAME = "csrfToken";
 const phoneSetupLabels: Record<PhoneSetupMode, string> = {
   call_forwarding: "Keep number + forward calls",
   port_existing: "Port existing number",
@@ -361,7 +362,11 @@ function launchChecklistItems(values: OnboardingChecklistValues, selectedMode: P
   ];
 }
 
-export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; activeTab: AdminTab }) {
+function CsrfField({ token }: { token: string }) {
+  return <input name={CSRF_FIELD_NAME} type="hidden" value={token} />;
+}
+
+export function AdminDashboard({ data, activeTab, csrfToken }: { data: AdminPortalData; activeTab: AdminTab; csrfToken: string }) {
   const [toast, setToast] = useState<string | null>(null);
 
   function showToast(message: string) {
@@ -371,10 +376,10 @@ export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; act
 
   return (
     <>
-      {activeTab === "overview" ? <Overview data={data} /> : null}
-      {activeTab === "onboarding" ? <Onboarding onQueuedCall={() => showToast("Test call queued for demo.")} /> : null}
-      {activeTab === "accounts" ? <Accounts data={data} onAction={() => showToast("Account opened for review.")} /> : null}
-      {activeTab === "phone" ? <PhoneSetup data={data} /> : null}
+      {activeTab === "overview" ? <Overview csrfToken={csrfToken} data={data} /> : null}
+      {activeTab === "onboarding" ? <Onboarding csrfToken={csrfToken} onQueuedCall={() => showToast("Test call queued for demo.")} /> : null}
+      {activeTab === "accounts" ? <Accounts csrfToken={csrfToken} data={data} onAction={() => showToast("Account opened for review.")} /> : null}
+      {activeTab === "phone" ? <PhoneSetup csrfToken={csrfToken} data={data} /> : null}
       {activeTab === "usage" ? <Usage data={data} /> : null}
       {activeTab === "billing" ? <Billing data={data} onAction={() => showToast("Billing note saved for demo.")} /> : null}
       {activeTab === "playbook" ? <Playbook onAction={() => showToast("AI playbook saved for demo.")} /> : null}
@@ -383,7 +388,7 @@ export function AdminDashboard({ data, activeTab }: { data: AdminPortalData; act
   );
 }
 
-function Overview({ data }: { data: AdminPortalData }) {
+function Overview({ csrfToken, data }: { csrfToken: string; data: AdminPortalData }) {
   return (
     <div className="grid">
       <div className="grid stats-grid">
@@ -394,7 +399,7 @@ function Overview({ data }: { data: AdminPortalData }) {
       </div>
       <section className="card">
         <h2>Account Health</h2>
-        <AccountTable data={data} />
+        <AccountTable csrfToken={csrfToken} data={data} />
       </section>
     </div>
   );
@@ -427,7 +432,7 @@ function Stat({
   );
 }
 
-function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: () => void }) {
+function AccountTable({ csrfToken, data, onAction }: { csrfToken: string; data: AdminPortalData; onAction?: () => void }) {
   return (
     <div className="table-wrap">
       <table className="table">
@@ -449,10 +454,10 @@ function AccountTable({ data, onAction }: { data: AdminPortalData; onAction?: ()
             return (
               <tr key={account.id}>
                 <td>
-                  <BusinessNameEditor account={account} />
+                  <BusinessNameEditor account={account} csrfToken={csrfToken} />
                 </td>
                 <td>
-                  <OwnerList account={account} />
+                  <OwnerList account={account} csrfToken={csrfToken} />
                 </td>
                 <td>{account.trade}</td>
                 <td>
@@ -526,7 +531,7 @@ function accountReadiness(account: AdminAccount) {
   };
 }
 
-function AccountCard({ account, onAction }: { account: AdminAccount; onAction: () => void }) {
+function AccountCard({ account, csrfToken, onAction }: { account: AdminAccount; csrfToken: string; onAction: () => void }) {
   const billing = account.manual_billing_accounts?.[0];
   const readiness = accountReadiness(account);
   const ownerContact = account.owners[0]?.phone ?? account.owners[0]?.email ?? "No owner contact";
@@ -535,13 +540,13 @@ function AccountCard({ account, onAction }: { account: AdminAccount; onAction: (
     <article className="admin-account-card">
       <div className="admin-account-main">
         <div className="admin-account-title-row">
-          <BusinessNameEditor account={account} />
+          <BusinessNameEditor account={account} csrfToken={csrfToken} />
           <StatusPill status={account.status} />
         </div>
         <div className="admin-account-meta-grid">
           <div>
             <span>Owner</span>
-            <OwnerList account={account} />
+            <OwnerList account={account} csrfToken={csrfToken} />
           </div>
           <div>
             <span>Trade</span>
@@ -629,11 +634,12 @@ function InlineNameSaveButton() {
   );
 }
 
-function BusinessNameEditor({ account }: { account: AdminAccount }) {
+function BusinessNameEditor({ account, csrfToken }: { account: AdminAccount; csrfToken: string }) {
   const [state, formAction] = useActionState(updateAdminBusinessName, {});
 
   return (
     <form action={formAction} className="inline-edit-form">
+      <CsrfField token={csrfToken} />
       <input name="businessId" type="hidden" value={account.id} />
       <input className="inline-edit-input" defaultValue={account.name} maxLength={120} name="businessName" required />
       <InlineNameSaveButton />
@@ -643,11 +649,12 @@ function BusinessNameEditor({ account }: { account: AdminAccount }) {
   );
 }
 
-function OwnerNameEditor({ owner }: { owner: AdminAccount["owners"][number] }) {
+function OwnerNameEditor({ csrfToken, owner }: { csrfToken: string; owner: AdminAccount["owners"][number] }) {
   const [state, formAction] = useActionState(updateAdminOwnerName, {});
 
   return (
     <form action={formAction} className="inline-edit-form">
+      <CsrfField token={csrfToken} />
       <input name="ownerId" type="hidden" value={owner.id} />
       <input className="inline-edit-input" defaultValue={owner.full_name ?? ""} maxLength={120} name="ownerName" placeholder="Owner name" required />
       <InlineNameSaveButton />
@@ -758,7 +765,7 @@ function BusinessHoursDropdowns({
   );
 }
 
-function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
+function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCall: () => void }) {
   const [state, formAction] = useActionState(onboardOwner, {});
   const [selectedMode, setSelectedMode] = useState<PhoneSetupMode>("twilio_number");
   const [checklistValues, setChecklistValues] = useState<OnboardingChecklistValues>(defaultOnboardingValues);
@@ -783,6 +790,7 @@ function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
       <section className="card">
         <h2>New Owner Setup</h2>
         <form action={formAction} onChange={(event) => syncChecklist(event.currentTarget)} onInput={(event) => syncChecklist(event.currentTarget)}>
+          <CsrfField token={csrfToken} />
           <div className="form-grid">
             <p className="meta full">
               Leave password blank to link an existing Supabase Auth user. Add a temporary password to create a new Auth user.
@@ -934,7 +942,7 @@ function Onboarding({ onQueuedCall }: { onQueuedCall: () => void }) {
   );
 }
 
-function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => void }) {
+function Accounts({ csrfToken, data, onAction }: { csrfToken: string; data: AdminPortalData; onAction: () => void }) {
   const router = useRouter();
   const [viewAccount, setViewAccount] = useState<AdminAccount | null>(null);
   const [editAccount, setEditAccount] = useState<AdminAccount | null>(null);
@@ -947,7 +955,7 @@ function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => v
       if (!window.confirm(`Delete ${account.name}? This removes the business account and related business data.`)) return;
 
       startDeleteTransition(async () => {
-        const result = await deleteAdminAccount(account.id);
+        const result = await deleteAdminAccount(account.id, csrfToken);
         if (result.error) {
           window.alert(result.error);
           return;
@@ -956,7 +964,7 @@ function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => v
         router.refresh();
       });
     },
-    [router]
+    [csrfToken, router]
   );
 
   return (
@@ -1071,6 +1079,7 @@ function Accounts({ data, onAction }: { data: AdminPortalData; onAction: () => v
       {editAccount ? (
         <EditAccountModal
           account={editAccount}
+          csrfToken={csrfToken}
           onClose={() => setEditAccount(null)}
           onSuccess={() => {
             setEditAccount(null);
@@ -1162,10 +1171,12 @@ function AccountDetailsModal({
 
 function EditAccountModal({
   account,
+  csrfToken,
   onClose,
   onSuccess
 }: {
   account: AdminAccount;
+  csrfToken: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -1194,7 +1205,7 @@ function EditAccountModal({
       if (!window.confirm("Remove these closed dates?")) return;
 
       startClosureDeleteTransition(async () => {
-        const result = await deleteAdminAvailabilityException(exceptionId);
+        const result = await deleteAdminAvailabilityException(exceptionId, csrfToken);
         if (result.error) {
           window.alert(result.error);
           return;
@@ -1203,7 +1214,7 @@ function EditAccountModal({
         router.refresh();
       });
     },
-    [router]
+    [csrfToken, router]
   );
 
   return (
@@ -1219,6 +1230,7 @@ function EditAccountModal({
           </button>
         </div>
         <form action={formAction} className="form-grid">
+          <CsrfField token={csrfToken} />
           <input name="businessId" type="hidden" value={account.id} />
           <input name="ownerId" type="hidden" value={owner?.id ?? ""} />
           <label className="field">
@@ -1432,6 +1444,7 @@ function EditAccountModal({
             <p className="meta">These dates block Ana from offering appointments, matching the owner settings.</p>
           </div>
           <form action={closureAction} className="form-grid admin-closure-form">
+            <CsrfField token={csrfToken} />
             <input name="businessId" type="hidden" value={account.id} />
             <label className="field">
               <span>Reason</span>
@@ -1479,14 +1492,14 @@ function EditAccountModal({
   );
 }
 
-function OwnerList({ account }: { account: AdminAccount }) {
+function OwnerList({ account, csrfToken }: { account: AdminAccount; csrfToken: string }) {
   if (!account.owners.length) return <span className="meta">No owner linked</span>;
 
   return (
     <div className="mini-stack">
       {account.owners.map((owner) => (
         <div key={owner.id}>
-          <OwnerNameEditor owner={owner} />
+          <OwnerNameEditor csrfToken={csrfToken} owner={owner} />
           <div className="meta">{owner.phone ?? owner.email ?? "No contact"}</div>
         </div>
       ))}
@@ -1532,7 +1545,7 @@ function PhoneScenarioPicker({
   );
 }
 
-function PhoneSetup({ data }: { data: AdminPortalData }) {
+function PhoneSetup({ csrfToken, data }: { csrfToken: string; data: AdminPortalData }) {
   return (
     <div className="grid">
       <section className="card">
@@ -1544,14 +1557,14 @@ function PhoneSetup({ data }: { data: AdminPortalData }) {
       </section>
       <div className="grid">
         {data.accounts.map((account) => (
-          <PhoneSetupForm account={account} key={account.id} />
+          <PhoneSetupForm account={account} csrfToken={csrfToken} key={account.id} />
         ))}
       </div>
     </div>
   );
 }
 
-function PhoneSetupForm({ account }: { account: AdminAccount }) {
+function PhoneSetupForm({ account, csrfToken }: { account: AdminAccount; csrfToken: string }) {
   const [state, formAction] = useActionState(updateBusinessPhoneSetup, {});
   const [selectedMode, setSelectedMode] = useState<PhoneSetupMode>(account.phone_setup_mode ?? "twilio_number");
   const selectedScenario = scenarioFor(selectedMode);
@@ -1561,7 +1574,7 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
       <div className="section-card-header">
         <div>
           <h2>{account.name}</h2>
-          <OwnerList account={account} />
+          <OwnerList account={account} csrfToken={csrfToken} />
         </div>
         <div className="phone-status-row">
           <span className={`pill ${setupStatusClass(account.voice_setup_status ?? "not_started")}`}>
@@ -1573,6 +1586,7 @@ function PhoneSetupForm({ account }: { account: AdminAccount }) {
         </div>
       </div>
       <form action={formAction}>
+        <CsrfField token={csrfToken} />
         <input name="businessId" type="hidden" value={account.id} />
         <PhoneScenarioPicker selectedMode={selectedMode} onSelect={setSelectedMode} />
         <div className="setup-guidance">

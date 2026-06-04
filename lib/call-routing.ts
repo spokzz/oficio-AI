@@ -134,15 +134,26 @@ export async function findBusinessRoutingContext(toPhone: string | null | undefi
 
   if (!phones.length) return null;
 
-  const filters = phones.flatMap((phone) => [`twilio_routing_phone.eq.${phone}`, `phone.eq.${phone}`]).join(",");
-  const { data: business, error: businessError } = await supabase
+  const { data: routingBusiness, error: routingBusinessError } = await supabase
     .from("businesses")
     .select("id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
-    .or(filters)
+    .in("twilio_routing_phone", phones)
     .limit(1)
     .maybeSingle<RoutingBusiness>();
+  if (routingBusinessError) return null;
 
-  if (businessError || !business) {
+  const { data: primaryBusiness, error: primaryBusinessError } = routingBusiness
+    ? { data: null, error: null }
+    : await supabase
+        .from("businesses")
+        .select("id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
+        .in("phone", phones)
+        .limit(1)
+        .maybeSingle<RoutingBusiness>();
+  if (primaryBusinessError) return null;
+
+  const business = routingBusiness ?? primaryBusiness;
+  if (!business) {
     return null;
   }
 
