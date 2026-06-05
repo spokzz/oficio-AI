@@ -31,6 +31,17 @@ function loadEnvFile(path) {
 loadEnvFile(".env.local");
 loadEnvFile(".env");
 
+const APP_ENVIRONMENTS = ["local", "staging", "production"];
+const PROTECTED_SECRET_ENV_NAMES = [
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "TWILIO_AUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "RESEND_API_KEY",
+  "GEOCODIO_API_KEY",
+  "CRON_SECRET",
+  "OFICIO_CRON_SECRET",
+  "INTERNAL_WEBHOOK_SECRET"
+];
 const SERVICE_OPTIONS = ["landscaping", "mowing", "tree_cutting", "yard_cleanup", "irrigation"];
 const CUSTOMER_SOURCE_OPTIONS = ["referral", "facebook", "google", "website", "instagram", "other"];
 const BUSINESS_DAY_OPTIONS = [
@@ -100,7 +111,73 @@ function optionalEnv(name) {
   return process.env[name]?.trim() || null;
 }
 
+function normalizeEnvironment(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "prod") return "production";
+  if (normalized === "preview") return "staging";
+  return APP_ENVIRONMENTS.includes(normalized) ? normalized : null;
+}
+
+function appEnvironment() {
+  return normalizeEnvironment(process.env.OFICIO_ENV) || normalizeEnvironment(process.env.VERCEL_ENV) || (process.env.NODE_ENV === "production" ? "production" : "local");
+}
+
+function truthy(value) {
+  return /^(1|true|yes)$/i.test(String(value ?? "").trim());
+}
+
+function supabaseProjectRef(url) {
+  try {
+    return new URL(String(url ?? "")).hostname.match(/^([a-z0-9-]+)\.supabase\.co$/i)?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+function assertSupabaseEnvironmentSafety(service = "voice-gateway") {
+  const env = appEnvironment();
+  const configuredRef = supabaseProjectRef(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const expectedRef = process.env.OFICIO_SUPABASE_PROJECT_REF?.trim();
+  const productionRef = process.env.OFICIO_PRODUCTION_SUPABASE_PROJECT_REF?.trim();
+
+  if (expectedRef && configuredRef && configuredRef !== expectedRef) {
+    throw new Error(`${service}: NEXT_PUBLIC_SUPABASE_URL points to ${configuredRef}, but OFICIO_SUPABASE_PROJECT_REF is ${expectedRef}.`);
+  }
+
+  if (env !== "production" && productionRef && configuredRef === productionRef && !truthy(process.env.OFICIO_ALLOW_PRODUCTION_SUPABASE_IN_NONPROD)) {
+    throw new Error(`${service}: ${env} is configured to use the production Supabase project.`);
+  }
+}
+
+function assertProviderEnvironmentSafety({ allowProductionInLocalEnvName, provider, providerEnvironment, service = "voice-gateway" }) {
+  const env = appEnvironment();
+  const secretEnv = normalizeEnvironment(providerEnvironment);
+
+  if (env === "local" && secretEnv === "production" && !truthy(process.env[allowProductionInLocalEnvName])) {
+    throw new Error(`${service}: local is configured to use production ${provider} secrets.`);
+  }
+
+  if (env === "staging" && secretEnv === "production" && !truthy(process.env.OFICIO_ALLOW_PRODUCTION_PROVIDER_SECRETS_IN_STAGING)) {
+    throw new Error(`${service}: staging is configured to use production ${provider} secrets.`);
+  }
+}
+
+function protectedSecretValues() {
+  return PROTECTED_SECRET_ENV_NAMES.map((name) => ({ name, value: process.env[name]?.trim() })).filter(
+    (secret) => secret.value && secret.value.length >= 12 && !secret.value.startsWith("your-") && !secret.value.startsWith("replace-with-")
+  );
+}
+
+function assertNoProtectedSecrets(value, label) {
+  for (const secret of protectedSecretValues()) {
+    if (String(value).includes(secret.value)) {
+      throw new Error(`${label} includes ${secret.name}. Secrets must not be sent to Ana prompts.`);
+    }
+  }
+}
+
 function supabaseAdmin() {
+  assertSupabaseEnvironmentSafety("voice-gateway-supabase");
   return createClient(requiredEnv("NEXT_PUBLIC_SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: {
       autoRefreshToken: false,
@@ -734,6 +811,12 @@ async function sendTwilioSms({ body, to }) {
   if (!accountSid || !authToken || (!messagingServiceSid && !fromPhone)) {
     return { ok: false, skipped: "sms_not_configured" };
   }
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_TWILIO_LOCAL",
+    provider: "Twilio",
+    providerEnvironment: process.env.TWILIO_ENV,
+    service: "voice-gateway-sms"
+  });
 
   const params = new URLSearchParams({
     Body: body,
@@ -771,6 +854,12 @@ async function sendOwnerEmail({ body, subject, to }) {
   if (!apiKey || !from || !to) {
     return { ok: false, skipped: "email_not_configured" };
   }
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_RESEND_LOCAL",
+    provider: "Resend",
+    providerEnvironment: process.env.RESEND_KEY_ENV,
+    service: "voice-gateway-email"
+  });
 
   const response = await fetch("https://api.resend.com/emails", {
     body: JSON.stringify({
@@ -1219,8 +1308,20 @@ async function rewriteOwnerText({ kind = "summary", language, text }) {
   if (!apiKey || process.env.OFICIO_OWNER_TRANSLATION_ENABLED === "false") {
     return compactText;
   }
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_OPENAI_LOCAL",
+    provider: "OpenAI",
+    providerEnvironment: process.env.OPENAI_KEY_ENV,
+    service: "voice-gateway-owner-translation"
+  });
 
   const target = ownerSummaryLanguage(language) === "es" ? "Spanish" : "English";
+  const developerInstructions =
+    `Rewrite this owner-facing ${kind} in clear ${target}. Use a professional business summary style: short outcome sentence, customer details, request details, missing information, and recommended owner action. ` +
+    "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
+    "Do not add facts. Do not include internal/debug phrases like tool call failed, realtime created, saved lead because, or owner approval SMS was not sent. " +
+    "Convert internal states into owner-friendly wording such as Needs owner approval, New lead created, Name not collected, Address missing, or Call ended before Ana collected all details. Return only the rewritten text.";
+  assertNoProtectedSecrets(developerInstructions, "voice gateway owner translation instructions");
 
   try {
     const response = await fetch(OPENAI_RESPONSES_URL, {
@@ -1230,11 +1331,7 @@ async function rewriteOwnerText({ kind = "summary", language, text }) {
             content: [
               {
                 type: "input_text",
-                text:
-                  `Rewrite this owner-facing ${kind} in clear ${target}. Use a professional business summary style: short outcome sentence, customer details, request details, missing information, and recommended owner action. ` +
-                  "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
-                  "Do not add facts. Do not include internal/debug phrases like tool call failed, realtime created, saved lead because, or owner approval SMS was not sent. " +
-                  "Convert internal states into owner-friendly wording such as Needs owner approval, New lead created, Name not collected, Address missing, or Call ended before Ana collected all details. Return only the rewritten text."
+                text: developerInstructions
               }
             ],
             role: "developer"
@@ -1384,6 +1481,12 @@ async function geocodeAddress(address) {
   if (!query) return { error: "No address was provided.", ok: false };
   const apiKey = geocodioApiKey();
   if (!apiKey) return { error: "GEOCODIO_API_KEY is not configured.", ok: false, skipped: "missing_api_key" };
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_GEOCODIO_LOCAL",
+    provider: "Geocodio",
+    providerEnvironment: process.env.GEOCODIO_KEY_ENV,
+    service: "voice-gateway-geocoding"
+  });
 
   const url = new URL(GEOCODIO_ENDPOINT);
   url.searchParams.set("q", query);
@@ -2250,6 +2353,12 @@ async function transferToOwner({ businessId, callSid, callSessionId, reason }) {
 
   const accountSid = requiredEnv("TWILIO_ACCOUNT_SID");
   const authToken = requiredEnv("TWILIO_AUTH_TOKEN");
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_TWILIO_LOCAL",
+    provider: "Twilio",
+    providerEnvironment: process.env.TWILIO_ENV,
+    service: "voice-gateway-transfer"
+  });
   const { business, ownerPhone, supabase } = await getBusinessContext(businessId);
 
   if (!ownerPhone) {
@@ -2292,6 +2401,12 @@ async function redirectLiveCallToTwiml({ callSid, twiml }) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!accountSid || !authToken || !callSid) return { ok: false };
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_TWILIO_LOCAL",
+    provider: "Twilio",
+    providerEnvironment: process.env.TWILIO_ENV,
+    service: "voice-gateway-call-redirect"
+  });
 
   const body = new URLSearchParams({ Twiml: twiml });
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`, {
@@ -2508,7 +2623,7 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
     business.base_address && baseLat !== null && baseLng !== null && Number.isFinite(radiusMiles)
       ? `Service area is ${radiusMiles} miles from ${business.base_address}. The book_appointment tool checks the address. If it says outside radius, politely say the business is not currently serving that area.`
       : "Service area is not fully configured yet. Keep collecting the caller's address and let the tool/system decide when possible.";
-  return [
+  const instructions = [
     `You are ${agent}, a warm phone receptionist for ${business.name}, a ${business.trade} business.`,
     "Sound upbeat, friendly, and human, like a great neighborhood coffee shop barista who remembers regulars. Keep replies short, warm, and natural.",
     knownCustomer?.id && hasKnownCustomerFullName
@@ -2549,9 +2664,17 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
     "Do not promise a final price unless a booking value is returned by a tool.",
     "After book_appointment succeeds, tell the caller the request was sent to the owner and they will receive a confirmation text after approval, then ask if there is anything else. Do not say the booking is final until owner approval happens."
   ].join("\n");
+  assertNoProtectedSecrets(instructions, "Ana realtime session instructions");
+  return instructions;
 }
 
 function createOpenAiSocket() {
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_OPENAI_LOCAL",
+    provider: "OpenAI",
+    providerEnvironment: process.env.OPENAI_KEY_ENV,
+    service: "voice-gateway-realtime"
+  });
   const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(OPENAI_MODEL)}`;
   return new WebSocket(url, {
     headers: {

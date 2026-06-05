@@ -8,6 +8,7 @@ import { normalizePhone } from "@/lib/phone";
 import { geocodeAddress } from "@/lib/geocoding";
 import type { ContactClassification } from "@/lib/types";
 import { validateCurrentUserCsrfToken, validateFormCsrfToken } from "@/lib/csrf";
+import { recordAuditEvent, requestAuditContext } from "@/lib/audit";
 
 export type AddCustomerState = {
   error?: string;
@@ -121,7 +122,7 @@ async function ownerBusinessId() {
 
   const { data: membership, error: membershipError } = await supabase
     .from("business_users")
-    .select("business_id")
+    .select("business_id,role")
     .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
@@ -134,7 +135,23 @@ async function ownerBusinessId() {
     return { error: "No business is linked to this owner account." };
   }
 
-  return { businessId: membership.business_id as string, supabase };
+  return { actorRole: String(membership.role ?? "owner"), businessId: membership.business_id as string, supabase, userId: user.id };
+}
+
+function ownerSettingsSnapshot(value: {
+  available_services?: unknown;
+  booking_time_zone?: unknown;
+  business_hours_text?: unknown;
+  owner_summary_channel?: unknown;
+  owner_summary_language?: unknown;
+}) {
+  return {
+    available_services: value.available_services,
+    booking_time_zone: value.booking_time_zone,
+    business_hours_text: value.business_hours_text,
+    owner_summary_channel: value.owner_summary_channel,
+    owner_summary_language: value.owner_summary_language
+  };
 }
 
 async function optionalGeocode(address: string) {
@@ -236,19 +253,54 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
     return { error: owner.error };
   }
 
+  const { data: beforeSettings, error: beforeSettingsError } = await owner.supabase
+    .from("businesses")
+    .select("available_services,booking_time_zone,business_hours_text,owner_summary_channel,owner_summary_language")
+    .eq("id", owner.businessId)
+    .maybeSingle();
+
+  if (beforeSettingsError) {
+    return { error: beforeSettingsError.message };
+  }
+
+  const afterSettings = {
+    available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
+    booking_time_zone: bookingTimeZone,
+    business_hours_text: businessHoursText,
+    owner_summary_channel: ownerSummaryChannel,
+    owner_summary_language: ownerSummaryLanguage
+  };
+
   const { error } = await owner.supabase
     .from("businesses")
-    .update({
-      available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
-      booking_time_zone: bookingTimeZone,
-      business_hours_text: businessHoursText,
-      owner_summary_channel: ownerSummaryChannel,
-      owner_summary_language: ownerSummaryLanguage
-    })
+    .update(afterSettings)
     .eq("id", owner.businessId);
 
   if (error) {
     return { error: error.message };
+  }
+
+  const auditContext = await requestAuditContext(owner.actorRole, owner.userId);
+  await recordAuditEvent(owner.supabase, {
+    ...auditContext,
+    action: "owner_settings_updated",
+    after: afterSettings,
+    before: beforeSettings ? ownerSettingsSnapshot(beforeSettings) : null,
+    businessId: owner.businessId,
+    entityId: owner.businessId,
+    entityType: "business"
+  });
+
+  if (beforeSettings?.owner_summary_language !== ownerSummaryLanguage) {
+    await recordAuditEvent(owner.supabase, {
+      ...auditContext,
+      action: "summary_language_changed",
+      after: { owner_summary_language: ownerSummaryLanguage },
+      before: { owner_summary_language: beforeSettings?.owner_summary_language ?? null },
+      businessId: owner.businessId,
+      entityId: owner.businessId,
+      entityType: "business"
+    });
   }
 
   revalidatePath("/owner");
@@ -282,31 +334,43 @@ export async function updateOwnerServiceArea(_state: OwnerServiceAreaState, form
     return { error: geocoded.error };
   }
 
-  const { error: businessError } = await owner.supabase
+  const { data: beforeBusinessArea, error: beforeBusinessAreaError } = await owner.supabase
     .from("businesses")
-    .update({
-      base_address: geocoded.address.formattedAddress,
-      base_geocode_accuracy: geocoded.address.accuracy,
-      base_geocode_provider: geocoded.address.provider,
-      base_geocoded_at: new Date().toISOString(),
-      base_lat: geocoded.address.lat,
-      base_lng: geocoded.address.lng
-    })
-    .eq("id", owner.businessId);
+    .select("base_address,base_geocode_accuracy,base_geocode_provider,base_lat,base_lng")
+    .eq("id", owner.businessId)
+    .maybeSingle();
 
-  if (businessError) {
-    return { error: businessError.message };
+  if (beforeBusinessAreaError) {
+    return { error: beforeBusinessAreaError.message };
   }
 
-  const { data: radiusRule, error: radiusReadError } = await owner.supabase
+  const { data: beforeRadiusRule, error: beforeRadiusReadError } = await owner.supabase
     .from("service_radius_rules")
-    .select("id")
+    .select("id,radius_miles,allow_outside_radius,require_owner_approval_outside_radius")
     .eq("business_id", owner.businessId)
     .limit(1)
     .maybeSingle();
 
-  if (radiusReadError) {
-    return { error: radiusReadError.message };
+  if (beforeRadiusReadError) {
+    return { error: beforeRadiusReadError.message };
+  }
+
+  const businessAreaPayload = {
+    base_address: geocoded.address.formattedAddress,
+    base_geocode_accuracy: geocoded.address.accuracy,
+    base_geocode_provider: geocoded.address.provider,
+    base_geocoded_at: new Date().toISOString(),
+    base_lat: geocoded.address.lat,
+    base_lng: geocoded.address.lng
+  };
+
+  const { error: businessError } = await owner.supabase
+    .from("businesses")
+    .update(businessAreaPayload)
+    .eq("id", owner.businessId);
+
+  if (businessError) {
+    return { error: businessError.message };
   }
 
   const radiusPayload = {
@@ -316,13 +380,33 @@ export async function updateOwnerServiceArea(_state: OwnerServiceAreaState, form
     require_owner_approval_outside_radius: allowOutsideRadius
   };
 
-  const radiusWrite = radiusRule?.id
-    ? await owner.supabase.from("service_radius_rules").update(radiusPayload).eq("id", radiusRule.id)
+  const radiusWrite = beforeRadiusRule?.id
+    ? await owner.supabase.from("service_radius_rules").update(radiusPayload).eq("id", beforeRadiusRule.id)
     : await owner.supabase.from("service_radius_rules").insert(radiusPayload);
 
   if (radiusWrite.error) {
     return { error: radiusWrite.error.message };
   }
+
+  await recordAuditEvent(owner.supabase, {
+    ...(await requestAuditContext(owner.actorRole, owner.userId)),
+    action: "service_radius_changed",
+    after: {
+      ...businessAreaPayload,
+      allow_outside_radius: radiusPayload.allow_outside_radius,
+      radius_miles: radiusPayload.radius_miles,
+      require_owner_approval_outside_radius: radiusPayload.require_owner_approval_outside_radius
+    },
+    before: {
+      ...beforeBusinessArea,
+      allow_outside_radius: beforeRadiusRule?.allow_outside_radius ?? null,
+      radius_miles: beforeRadiusRule?.radius_miles ?? null,
+      require_owner_approval_outside_radius: beforeRadiusRule?.require_owner_approval_outside_radius ?? null
+    },
+    businessId: owner.businessId,
+    entityId: beforeRadiusRule?.id ?? owner.businessId,
+    entityType: "service_radius_rule"
+  });
 
   revalidatePath("/owner");
 
@@ -700,6 +784,17 @@ export async function updateOwnerBooking(_state: AddBookingState, formData: Form
     return { error: customerError?.message ?? "Choose a valid customer." };
   }
 
+  const { data: beforeBooking, error: beforeBookingError } = await owner.supabase
+    .from("jobs")
+    .select("id,status,scheduled_start,customer_id,service_type,address")
+    .eq("id", bookingId)
+    .eq("business_id", owner.businessId)
+    .maybeSingle();
+
+  if (beforeBookingError || !beforeBooking) {
+    return { error: beforeBookingError?.message ?? "Could not update booking." };
+  }
+
   const title = bookingTitle(input.serviceType);
   const scheduledStart = input.bookingStatus === "confirmed" ? input.scheduledStart?.toISOString() : null;
   const bookingAddress = input.address || String(customer.address ?? "");
@@ -724,11 +819,35 @@ export async function updateOwnerBooking(_state: AddBookingState, formData: Form
     })
     .eq("id", bookingId)
     .eq("business_id", owner.businessId)
-    .select("id")
+    .select("id,status,scheduled_start,customer_id,service_type,address")
     .maybeSingle();
 
   if (bookingError || !booking) {
     return { error: bookingError?.message ?? "Could not update booking." };
+  }
+
+  if (beforeBooking.status !== booking.status) {
+    await recordAuditEvent(owner.supabase, {
+      ...(await requestAuditContext(owner.actorRole, owner.userId)),
+      action: "job_status_changed",
+      after: {
+        address: booking.address,
+        customer_id: booking.customer_id,
+        scheduled_start: booking.scheduled_start,
+        service_type: booking.service_type,
+        status: booking.status
+      },
+      before: {
+        address: beforeBooking.address,
+        customer_id: beforeBooking.customer_id,
+        scheduled_start: beforeBooking.scheduled_start,
+        service_type: beforeBooking.service_type,
+        status: beforeBooking.status
+      },
+      businessId: owner.businessId,
+      entityId: bookingId,
+      entityType: "job"
+    });
   }
 
   revalidatePath("/owner");
@@ -923,7 +1042,7 @@ export async function deleteOwnerCustomer(customerId: string, csrfToken: string)
 
   const { data: customer, error: customerReadError } = await owner.supabase
     .from("customers")
-    .select("full_name")
+    .select("id,full_name,phone,email,address,preferred_language,referral_source,recurring_service_type,recurring_interval_weeks,service_fee,notes")
     .eq("id", trimmedCustomerId)
     .eq("business_id", owner.businessId)
     .maybeSingle();
@@ -941,6 +1060,16 @@ export async function deleteOwnerCustomer(customerId: string, csrfToken: string)
   if (customerDeleteError) {
     return { error: customerDeleteError.message };
   }
+
+  await recordAuditEvent(owner.supabase, {
+    ...(await requestAuditContext(owner.actorRole, owner.userId)),
+    action: "customer_deleted",
+    after: null,
+    before: customer ?? null,
+    businessId: owner.businessId,
+    entityId: trimmedCustomerId,
+    entityType: "customer"
+  });
 
   revalidatePath("/owner");
 

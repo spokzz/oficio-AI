@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePhoneCustomer, findBusinessRoutingContext, upsertCallerContact } from "@/lib/call-routing";
 import { normalizePhone } from "@/lib/phone";
 import { parseTwilioForm, reserveTwilioWebhookEvent, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
+import { auditContextFromHeaders, recordAuditEvent, type AuditContext } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -72,16 +73,27 @@ type OwnerBookingConfirmation = {
 };
 
 async function handleOwnerBookingConfirmation({
+  auditContext,
   confirmation,
   response,
   toPhone
 }: {
+  auditContext: AuditContext;
   confirmation: OwnerBookingConfirmation;
   response: "yes" | "no";
   toPhone: string | null;
 }) {
   const supabase = createAdminClient();
   const now = new Date().toISOString();
+  const { data: beforeJob, error: beforeJobError } = await supabase
+    .from("jobs")
+    .select("id,status,scheduled_start,customer_id,service_type,address")
+    .eq("id", confirmation.job_id)
+    .maybeSingle();
+
+  if (beforeJobError) {
+    return twimlResponse(messageTwiml("Ana could not read that booking request. Please try again."), { status: 500 });
+  }
 
   if (response === "no") {
     const { error: jobError } = await supabase.from("jobs").update({ status: "lead" }).eq("id", confirmation.job_id);
@@ -100,6 +112,27 @@ async function handleOwnerBookingConfirmation({
 
     if (confirmationError) {
       return twimlResponse(messageTwiml("Ana saved the lead but could not close the approval request."), { status: 500 });
+    }
+
+    await recordAuditEvent(supabase, {
+      ...auditContext,
+      action: "booking_declined",
+      after: { owner_response: "no_decline", status: "declined" },
+      before: { owner_response: null, status: beforeJob?.status ?? null },
+      businessId: confirmation.business_id,
+      entityId: confirmation.id,
+      entityType: "owner_booking_confirmation"
+    });
+    if (beforeJob?.status !== "lead") {
+      await recordAuditEvent(supabase, {
+        ...auditContext,
+        action: "job_status_changed",
+        after: { status: "lead" },
+        before: { status: beforeJob?.status ?? null },
+        businessId: confirmation.business_id,
+        entityId: confirmation.job_id,
+        entityType: "job"
+      });
     }
 
     return twimlResponse(messageTwiml("Got it. Ana moved the booking request to Leads and did not text the customer."));
@@ -124,6 +157,31 @@ async function handleOwnerBookingConfirmation({
           status: "failed"
         })
         .eq("id", confirmation.id);
+
+      await recordAuditEvent(supabase, {
+        ...auditContext,
+        action: "booking_approved",
+        after: {
+          error_message: "Customer confirmation SMS failed template validation.",
+          owner_response: "yes_approve",
+          status: "failed"
+        },
+        before: { owner_response: null, status: beforeJob?.status ?? null },
+        businessId: confirmation.business_id,
+        entityId: confirmation.id,
+        entityType: "owner_booking_confirmation"
+      });
+      if (beforeJob?.status !== "confirmed") {
+        await recordAuditEvent(supabase, {
+          ...auditContext,
+          action: "job_status_changed",
+          after: { status: "confirmed" },
+          before: { status: beforeJob?.status ?? null },
+          businessId: confirmation.business_id,
+          entityId: confirmation.job_id,
+          entityType: "job"
+        });
+      }
 
       return twimlResponse(messageTwiml("Booking approved, but Ana could not text the customer because the message template was invalid. Please follow up manually."));
     }
@@ -158,6 +216,30 @@ async function handleOwnerBookingConfirmation({
           status: "approved"
         })
         .eq("id", confirmation.id);
+      await recordAuditEvent(supabase, {
+        ...auditContext,
+        action: "booking_approved",
+        after: {
+          error_message: message,
+          owner_response: "yes_approve",
+          status: "approved"
+        },
+        before: { owner_response: null, status: beforeJob?.status ?? null },
+        businessId: confirmation.business_id,
+        entityId: confirmation.id,
+        entityType: "owner_booking_confirmation"
+      });
+      if (beforeJob?.status !== "confirmed") {
+        await recordAuditEvent(supabase, {
+          ...auditContext,
+          action: "job_status_changed",
+          after: { status: "confirmed" },
+          before: { status: beforeJob?.status ?? null },
+          businessId: confirmation.business_id,
+          entityId: confirmation.job_id,
+          entityType: "job"
+        });
+      }
       return twimlResponse(messageTwiml("Booking confirmed, but Ana could not text the customer. Please follow up manually."));
     }
   }
@@ -174,6 +256,31 @@ async function handleOwnerBookingConfirmation({
 
   if (confirmationError) {
     return twimlResponse(messageTwiml("Ana confirmed the booking but could not close the approval request."), { status: 500 });
+  }
+
+  await recordAuditEvent(supabase, {
+    ...auditContext,
+    action: "booking_approved",
+    after: {
+      customer_message_sid: customerMessageSid,
+      owner_response: "yes_approve",
+      status: "approved"
+    },
+    before: { owner_response: null, status: beforeJob?.status ?? null },
+    businessId: confirmation.business_id,
+    entityId: confirmation.id,
+    entityType: "owner_booking_confirmation"
+  });
+  if (beforeJob?.status !== "confirmed") {
+    await recordAuditEvent(supabase, {
+      ...auditContext,
+      action: "job_status_changed",
+      after: { status: "confirmed" },
+      before: { status: beforeJob?.status ?? null },
+      businessId: confirmation.business_id,
+      entityId: confirmation.job_id,
+      entityType: "job"
+    });
   }
 
   return twimlResponse(messageTwiml(customerPhone ? "Confirmed. Ana texted the customer with the booking details." : "Confirmed. No customer phone was available for SMS."));
@@ -316,6 +423,7 @@ export async function POST(request: Request) {
 
   if (bookingConfirmation) {
     return handleOwnerBookingConfirmation({
+      auditContext: auditContextFromHeaders(request.headers, "owner_sms"),
       confirmation: bookingConfirmation,
       response,
       toPhone: normalizePhone(params.To)

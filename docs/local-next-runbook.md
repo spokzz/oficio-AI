@@ -29,11 +29,18 @@ cp .env.example .env.local
 Fill in:
 
 ```bash
+OFICIO_ENV=local
+OFICIO_SUPABASE_PROJECT_REF=your-project-ref
+OFICIO_PRODUCTION_SUPABASE_PROJECT_REF=your-production-project-ref
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+OPENAI_KEY_ENV=local
+TWILIO_ENV=local
+GEOCODIO_KEY_ENV=local
+RESEND_KEY_ENV=local
 ```
 
-Do not put your service role key in browser/client code.
+Do not put your service role key in browser/client code. Keep all real `.env*` files local; only `.env.example` should be committed.
 
 ## 4. Make Sure Supabase Has Data
 
@@ -82,7 +89,10 @@ OFICIO_NEXT_APP_ORIGIN=http://localhost:3000
 OPENAI_API_KEY=your-openai-key
 OPENAI_REALTIME_MODEL=gpt-realtime-mini
 OPENAI_REALTIME_VOICE=marin
+OPENAI_KEY_ENV=local
+TWILIO_ENV=local
 RESEND_API_KEY=optional-for-email-summaries
+RESEND_KEY_ENV=local
 OFICIO_SUMMARY_FROM_EMAIL="Ana <ana@yourdomain.com>"
 ```
 

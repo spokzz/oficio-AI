@@ -1,3 +1,5 @@
+import { assertNoProtectedSecrets, assertProviderEnvironmentSafety } from "@/lib/environment";
+
 export type OwnerSummaryLanguage = "en" | "es";
 
 type TranslateOwnerTextParams = {
@@ -52,9 +54,21 @@ export async function tryTranslateOwnerText({ kind = "summary", language, text }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!ownerTranslationConfigured() || !apiKey) return null;
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_OPENAI_LOCAL",
+    provider: "OpenAI",
+    providerEnvironment: process.env.OPENAI_KEY_ENV,
+    service: "owner-summary-translation"
+  });
 
   const target = language === "es" ? "Spanish" : "English";
   const model = process.env.OPENAI_TRANSLATION_MODEL || DEFAULT_TRANSLATION_MODEL;
+  const developerInstructions =
+    `Rewrite this owner-facing ${kind} in clear ${target}. Use a professional business summary style: short outcome sentence, customer details, request details, missing information, and recommended owner action. ` +
+    "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
+    "Do not add facts. Do not include internal/debug phrases like tool call failed, realtime created, saved lead because, or owner approval SMS was not sent. " +
+    "Convert internal states into owner-friendly wording such as Needs owner approval, New lead created, Name not collected, Address missing, or Call ended before Ana collected all details. Return only the rewritten text.";
+  assertNoProtectedSecrets(developerInstructions, "owner summary translation instructions");
 
   try {
     const response = await fetch(OPENAI_RESPONSES_URL, {
@@ -64,11 +78,7 @@ export async function tryTranslateOwnerText({ kind = "summary", language, text }
             content: [
               {
                 type: "input_text",
-                text:
-                  `Rewrite this owner-facing ${kind} in clear ${target}. Use a professional business summary style: short outcome sentence, customer details, request details, missing information, and recommended owner action. ` +
-                  "Preserve names, phone numbers, addresses, dates, times, prices, and service details exactly. " +
-                  "Do not add facts. Do not include internal/debug phrases like tool call failed, realtime created, saved lead because, or owner approval SMS was not sent. " +
-                  "Convert internal states into owner-friendly wording such as Needs owner approval, New lead created, Name not collected, Address missing, or Call ended before Ana collected all details. Return only the rewritten text."
+                text: developerInstructions
               }
             ],
             role: "developer"

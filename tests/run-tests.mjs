@@ -45,14 +45,53 @@ const browserRenderedSource = sourceFiles(new URL("../app/", import.meta.url))
   .concat(sourceFiles(new URL("../components/", import.meta.url)))
   .map((fileUrl) => fs.readFileSync(fileUrl, "utf8"))
   .join("\n");
+const dashboardRenderedSource = sourceFiles(new URL("../components/", import.meta.url))
+  .concat([
+    new URL("../app/admin/page.tsx", import.meta.url),
+    new URL("../app/owner/page.tsx", import.meta.url),
+    new URL("../app/owner/no-business/page.tsx", import.meta.url),
+    new URL("../app/admin/login/page.tsx", import.meta.url),
+    new URL("../app/owner/login/page.tsx", import.meta.url)
+  ])
+  .map((fileUrl) => fs.readFileSync(fileUrl, "utf8"))
+  .join("\n");
 for (const unsafeSink of ["dangerouslySetInnerHTML", ".innerHTML", ".outerHTML", "insertAdjacentHTML", "DOMParser", "marked(", "markdown-to-jsx"]) {
   assert.equal(browserRenderedSource.includes(unsafeSink), false, `Dashboard code should render untrusted fields as text, not use ${unsafeSink}`);
+}
+for (const secretName of [
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "TWILIO_AUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "RESEND_API_KEY",
+  "GEOCODIO_API_KEY",
+  "CRON_SECRET",
+  "INTERNAL_WEBHOOK_SECRET"
+]) {
+  assert.equal(dashboardRenderedSource.includes(secretName), false, `Dashboard-rendered code should not reference protected secret ${secretName}`);
+}
+
+const gitignoreSource = fs.readFileSync(new URL("../.gitignore", import.meta.url), "utf8");
+assert.equal(gitignoreSource.includes(".env*"), true, "All concrete env files should be gitignored");
+assert.equal(gitignoreSource.includes("!.env.example"), true, ".env.example should remain the only tracked env template");
+
+const environmentSource = fs.readFileSync(new URL("../lib/environment.ts", import.meta.url), "utf8");
+assert.equal(environmentSource.includes("assertSupabaseEnvironmentSafety"), true, "Environment guard should validate Supabase project separation");
+assert.equal(environmentSource.includes("assertProviderEnvironmentSafety"), true, "Environment guard should validate provider secret labels");
+assert.equal(environmentSource.includes("assertNoProtectedSecrets"), true, "Environment guard should block protected secrets in prompts/config text");
+
+const supabaseAdminSource = fs.readFileSync(new URL("../lib/supabase/admin.ts", import.meta.url), "utf8");
+assert.equal(supabaseAdminSource.includes("assertSupabaseEnvironmentSafety"), true, "Supabase admin client should enforce environment separation");
+
+const envExampleSource = fs.readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+for (const envName of ["OFICIO_ENV", "OFICIO_SUPABASE_PROJECT_REF", "OFICIO_PRODUCTION_SUPABASE_PROJECT_REF", "OPENAI_KEY_ENV", "TWILIO_ENV", "GEOCODIO_KEY_ENV", "RESEND_KEY_ENV", "CSRF_SECRET"]) {
+  assert.equal(envExampleSource.includes(envName), true, `.env.example should document ${envName}`);
 }
 
 const csrfSource = fs.readFileSync(new URL("../lib/csrf.ts", import.meta.url), "utf8");
 assert.equal(csrfSource.includes("createHmac"), true, "CSRF tokens should be signed server-side");
 assert.equal(csrfSource.includes("timingSafeEqual"), true, "CSRF signatures should use constant-time comparison");
 assert.equal(csrfSource.includes("CSRF_SECRET must be configured in production"), true, "Production CSRF protection should require a server secret");
+assert.equal(csrfSource.includes("TWILIO_AUTH_TOKEN || process.env.OPENAI_API_KEY"), false, "CSRF should not reuse protected provider secrets");
 
 const ownerActionsSource = fs.readFileSync(new URL("../app/actions/owner.ts", import.meta.url), "utf8");
 const adminActionsSource = fs.readFileSync(new URL("../app/actions/admin.ts", import.meta.url), "utf8");
@@ -131,6 +170,9 @@ assert.equal(realtimeGatewaySource.includes("PROMPT_INJECTION_PATTERNS"), true, 
 assert.equal(realtimeGatewaySource.includes("validateToolArgs"), true, "Realtime tools should validate required fields before backend writes");
 assert.equal(realtimeGatewaySource.includes("owner_approval_sent"), true, "Realtime tools should not return internal owner approval records to the model");
 assert.equal(realtimeGatewaySource.includes("booking_id: job.id"), false, "Realtime tools should not expose internal booking ids to the model");
+assert.equal(realtimeGatewaySource.includes("assertSupabaseEnvironmentSafety"), true, "Realtime gateway should enforce Supabase environment separation");
+assert.equal(realtimeGatewaySource.includes("assertProviderEnvironmentSafety"), true, "Realtime gateway should enforce provider environment labels");
+assert.equal(realtimeGatewaySource.includes("assertNoProtectedSecrets(instructions"), true, "Realtime gateway should check Ana instructions for protected secrets");
 
 const smsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
 assert.equal(smsRouteSource.includes("validCustomerConfirmationSms"), true, "Customer confirmation SMS should be template-validated before sending");
@@ -164,6 +206,44 @@ for (const table of [
   );
 }
 assert.equal(migrationSql.includes("prevent_non_admin_user_role_change"), true, "Non-admin users should not be able to change user roles");
+assert.equal(migrationSql.includes("create table if not exists public.audit_events"), true, "Audit events table should exist");
+assert.equal(migrationSql.includes("alter table public.audit_events enable row level security"), true, "Audit events should have RLS enabled");
+for (const column of [
+  "business_id",
+  "actor_user_id",
+  "actor_role",
+  "action",
+  "entity_type",
+  "entity_id",
+  "before_json",
+  "after_json",
+  "ip_address",
+  "user_agent",
+  "created_at"
+]) {
+  assert.equal(migrationSql.includes(column), true, `Audit events should include ${column}`);
+}
+
+const auditSource = fs.readFileSync(new URL("../lib/audit.ts", import.meta.url), "utf8");
+assert.equal(auditSource.includes("recordAuditEvent"), true, "Audit helper should expose recordAuditEvent");
+assert.equal(auditSource.includes("requestAuditContext"), true, "Audit helper should capture dashboard request context");
+for (const action of [
+  "owner_settings_updated",
+  "admin_twilio_numbers_updated",
+  "booking_approved",
+  "booking_declined",
+  "job_status_changed",
+  "summary_language_changed",
+  "customer_deleted",
+  "service_radius_changed",
+  "owner_phone_changed"
+]) {
+  assert.equal(
+    ownerActionsSource.includes(action) || adminActionsSource.includes(action) || smsRouteSource.includes(action),
+    true,
+    `Audit logging should track ${action}`
+  );
+}
 
 const registry = createActiveVoiceCallRegistry();
 const callA = { businessId: "business-1", status: "active_with_ana", twilioCallSid: "CA_A", twilioStreamSid: "MS_A" };

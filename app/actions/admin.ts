@@ -8,6 +8,7 @@ import { isServiceOption, serviceOptionDefaults } from "@/lib/services";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { validateCurrentUserCsrfToken, validateFormCsrfToken } from "@/lib/csrf";
+import { recordAuditEvent, requestAuditContext } from "@/lib/audit";
 
 type OnboardingState = {
   error?: string;
@@ -80,7 +81,45 @@ async function requirePlatformAdmin() {
     return { error: "Only platform admins can manage this setup." } as const;
   }
 
-  return { supabase } as const;
+  return { actorRole: "platform_admin", supabase, userId: user.id } as const;
+}
+
+function phoneSetupSnapshot(value: {
+  ai_voice_name?: unknown;
+  booking_time_zone?: unknown;
+  business_hours_text?: unknown;
+  existing_number_kind?: unknown;
+  messaging_service_sid?: unknown;
+  owner_summary_channel?: unknown;
+  owner_summary_language?: unknown;
+  owner_transfer_phone?: unknown;
+  phone?: unknown;
+  phone_setup_mode?: unknown;
+  phone_setup_notes?: unknown;
+  phone_setup_owner_approved?: unknown;
+  porting_status?: unknown;
+  sms_setup_status?: unknown;
+  twilio_routing_phone?: unknown;
+  voice_setup_status?: unknown;
+}) {
+  return {
+    ai_voice_name: value.ai_voice_name,
+    booking_time_zone: value.booking_time_zone,
+    business_hours_text: value.business_hours_text,
+    existing_number_kind: value.existing_number_kind,
+    messaging_service_sid: value.messaging_service_sid,
+    owner_summary_channel: value.owner_summary_channel,
+    owner_summary_language: value.owner_summary_language,
+    owner_transfer_phone: value.owner_transfer_phone,
+    phone: value.phone,
+    phone_setup_mode: value.phone_setup_mode,
+    phone_setup_notes: value.phone_setup_notes,
+    phone_setup_owner_approved: value.phone_setup_owner_approved,
+    porting_status: value.porting_status,
+    sms_setup_status: value.sms_setup_status,
+    twilio_routing_phone: value.twilio_routing_phone,
+    voice_setup_status: value.voice_setup_status
+  };
 }
 
 export async function onboardOwner(_state: OnboardingState, formData: FormData): Promise<OnboardingState> {
@@ -401,37 +440,95 @@ export async function updateBusinessPhoneSetup(_state: PhoneSetupState, formData
     return { error: geocodedBusinessAddress.error };
   }
 
+  const { data: beforePhoneSetup, error: beforePhoneSetupError } = await admin.supabase
+    .from("businesses")
+    .select(
+      "ai_voice_name,booking_time_zone,business_hours_text,existing_number_kind,messaging_service_sid,owner_summary_channel,owner_summary_language,owner_transfer_phone,phone,phone_setup_mode,phone_setup_notes,phone_setup_owner_approved,porting_status,sms_setup_status,twilio_routing_phone,voice_setup_status"
+    )
+    .eq("id", businessId)
+    .maybeSingle();
+
+  if (beforePhoneSetupError) {
+    return { error: beforePhoneSetupError.message };
+  }
+
+  const phoneSetupPayload = {
+    phone: businessPhone,
+    base_address: geocodedBusinessAddress.address?.formattedAddress ?? (businessAddress || null),
+    base_geocode_accuracy: geocodedBusinessAddress.address?.accuracy ?? null,
+    base_geocode_provider: geocodedBusinessAddress.address?.provider ?? null,
+    base_geocoded_at: geocodedBusinessAddress.address ? new Date().toISOString() : null,
+    base_lat: geocodedBusinessAddress.address?.lat ?? null,
+    base_lng: geocodedBusinessAddress.address?.lng ?? null,
+    twilio_routing_phone: twilioRoutingPhone,
+    owner_transfer_phone: ownerTransferPhone,
+    phone_setup_mode: phoneSetupMode,
+    voice_setup_status: voiceSetupStatus,
+    sms_setup_status: smsSetupStatus,
+    messaging_service_sid: messagingServiceSid || null,
+    owner_summary_channel: ownerSummaryChannel,
+    owner_summary_language: ownerSummaryLanguage,
+    booking_time_zone: bookingTimeZone,
+    business_hours_text: businessHoursText,
+    ai_voice_name: agentName,
+    ai_disclosure: `Hi, this is ${agentName}, the AI assistant for this business. How can I help?`,
+    existing_number_kind: existingNumberKind,
+    porting_status: phoneSetupMode === "port_existing" ? portingStatus : "not_started",
+    phone_setup_owner_approved: ownerApproved,
+    phone_setup_notes: phoneSetupNotes || null
+  };
+
   const { error } = await admin.supabase
     .from("businesses")
-    .update({
-      phone: businessPhone,
-      base_address: geocodedBusinessAddress.address?.formattedAddress ?? (businessAddress || null),
-      base_geocode_accuracy: geocodedBusinessAddress.address?.accuracy ?? null,
-      base_geocode_provider: geocodedBusinessAddress.address?.provider ?? null,
-      base_geocoded_at: geocodedBusinessAddress.address ? new Date().toISOString() : null,
-      base_lat: geocodedBusinessAddress.address?.lat ?? null,
-      base_lng: geocodedBusinessAddress.address?.lng ?? null,
-      twilio_routing_phone: twilioRoutingPhone,
-      owner_transfer_phone: ownerTransferPhone,
-      phone_setup_mode: phoneSetupMode,
-      voice_setup_status: voiceSetupStatus,
-      sms_setup_status: smsSetupStatus,
-      messaging_service_sid: messagingServiceSid || null,
-      owner_summary_channel: ownerSummaryChannel,
-      owner_summary_language: ownerSummaryLanguage,
-      booking_time_zone: bookingTimeZone,
-      business_hours_text: businessHoursText,
-      ai_voice_name: agentName,
-      ai_disclosure: `Hi, this is ${agentName}, the AI assistant for this business. How can I help?`,
-      existing_number_kind: existingNumberKind,
-      porting_status: phoneSetupMode === "port_existing" ? portingStatus : "not_started",
-      phone_setup_owner_approved: ownerApproved,
-      phone_setup_notes: phoneSetupNotes || null
-    })
+    .update(phoneSetupPayload)
     .eq("id", businessId);
 
   if (error) {
     return { error: error.message };
+  }
+
+  const auditContext = await requestAuditContext(admin.actorRole, admin.userId);
+  await recordAuditEvent(admin.supabase, {
+    ...auditContext,
+    action: "phone_setup_updated",
+    after: phoneSetupSnapshot(phoneSetupPayload),
+    before: beforePhoneSetup ? phoneSetupSnapshot(beforePhoneSetup) : null,
+    businessId,
+    entityId: businessId,
+    entityType: "business"
+  });
+
+  if (
+    beforePhoneSetup?.twilio_routing_phone !== twilioRoutingPhone ||
+    beforePhoneSetup?.messaging_service_sid !== (messagingServiceSid || null)
+  ) {
+    await recordAuditEvent(admin.supabase, {
+      ...auditContext,
+      action: "admin_twilio_numbers_updated",
+      after: {
+        messaging_service_sid: messagingServiceSid || null,
+        twilio_routing_phone: twilioRoutingPhone
+      },
+      before: {
+        messaging_service_sid: beforePhoneSetup?.messaging_service_sid ?? null,
+        twilio_routing_phone: beforePhoneSetup?.twilio_routing_phone ?? null
+      },
+      businessId,
+      entityId: businessId,
+      entityType: "business"
+    });
+  }
+
+  if (beforePhoneSetup?.owner_summary_language !== ownerSummaryLanguage) {
+    await recordAuditEvent(admin.supabase, {
+      ...auditContext,
+      action: "summary_language_changed",
+      after: { owner_summary_language: ownerSummaryLanguage },
+      before: { owner_summary_language: beforePhoneSetup?.owner_summary_language ?? null },
+      businessId,
+      entityId: businessId,
+      entityType: "business"
+    });
   }
 
   revalidatePath("/admin");
@@ -577,37 +674,64 @@ export async function updateAdminAccount(_state: AdminAccountState, formData: Fo
   const geocodedBusinessAddress = await geocodeBusinessAddress(businessAddress);
   if ("error" in geocodedBusinessAddress) return { error: geocodedBusinessAddress.error };
 
+  const { data: beforeBusiness, error: beforeBusinessError } = await admin.supabase
+    .from("businesses")
+    .select(
+      "ai_voice_name,available_services,base_address,base_geocode_accuracy,base_geocode_provider,base_lat,base_lng,booking_time_zone,business_hours_text,existing_number_kind,messaging_service_sid,name,owner_summary_channel,owner_summary_language,owner_transfer_phone,phone,phone_setup_mode,phone_setup_notes,phone_setup_owner_approved,porting_status,sms_setup_status,status,trade,twilio_routing_phone,voice_setup_status"
+    )
+    .eq("id", businessId)
+    .maybeSingle();
+
+  if (beforeBusinessError) return { error: beforeBusinessError.message };
+
+  const { data: beforeOwner, error: beforeOwnerError } = ownerId
+    ? await admin.supabase.from("users").select("id,full_name,phone").eq("id", ownerId).eq("role", "owner").maybeSingle()
+    : { data: null, error: null };
+
+  if (beforeOwnerError) return { error: beforeOwnerError.message };
+
+  const { data: beforeRadiusRule, error: beforeRadiusReadError } = await admin.supabase
+    .from("service_radius_rules")
+    .select("id,radius_miles,allow_outside_radius,require_owner_approval_outside_radius")
+    .eq("business_id", businessId)
+    .limit(1)
+    .maybeSingle();
+
+  if (beforeRadiusReadError) return { error: beforeRadiusReadError.message };
+
+  const businessPayload = {
+    name: businessName,
+    trade,
+    status: businessStatus,
+    phone: businessPhone,
+    base_address: geocodedBusinessAddress.address?.formattedAddress ?? (businessAddress || null),
+    base_geocode_accuracy: geocodedBusinessAddress.address?.accuracy ?? null,
+    base_geocode_provider: geocodedBusinessAddress.address?.provider ?? null,
+    base_geocoded_at: geocodedBusinessAddress.address ? new Date().toISOString() : null,
+    base_lat: geocodedBusinessAddress.address?.lat ?? null,
+    base_lng: geocodedBusinessAddress.address?.lng ?? null,
+    twilio_routing_phone: twilioRoutingPhone,
+    owner_transfer_phone: ownerTransferPhone,
+    phone_setup_mode: phoneSetupMode,
+    voice_setup_status: voiceSetupStatus,
+    sms_setup_status: smsSetupStatus,
+    messaging_service_sid: messagingServiceSid || null,
+    owner_summary_channel: ownerSummaryChannel,
+    owner_summary_language: ownerSummaryLanguage,
+    available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
+    booking_time_zone: bookingTimeZone,
+    business_hours_text: businessHoursText,
+    ai_voice_name: agentName,
+    ai_disclosure: `Hi, this is ${agentName}, the AI assistant for this business. How can I help?`,
+    existing_number_kind: existingNumberKind,
+    porting_status: phoneSetupMode === "port_existing" ? portingStatus : "not_started",
+    phone_setup_owner_approved: ownerApproved,
+    phone_setup_notes: phoneSetupNotes || null
+  };
+
   const { error: businessError } = await admin.supabase
     .from("businesses")
-    .update({
-      name: businessName,
-      trade,
-      status: businessStatus,
-      phone: businessPhone,
-      base_address: geocodedBusinessAddress.address?.formattedAddress ?? (businessAddress || null),
-      base_geocode_accuracy: geocodedBusinessAddress.address?.accuracy ?? null,
-      base_geocode_provider: geocodedBusinessAddress.address?.provider ?? null,
-      base_geocoded_at: geocodedBusinessAddress.address ? new Date().toISOString() : null,
-      base_lat: geocodedBusinessAddress.address?.lat ?? null,
-      base_lng: geocodedBusinessAddress.address?.lng ?? null,
-      twilio_routing_phone: twilioRoutingPhone,
-      owner_transfer_phone: ownerTransferPhone,
-      phone_setup_mode: phoneSetupMode,
-      voice_setup_status: voiceSetupStatus,
-      sms_setup_status: smsSetupStatus,
-      messaging_service_sid: messagingServiceSid || null,
-      owner_summary_channel: ownerSummaryChannel,
-      owner_summary_language: ownerSummaryLanguage,
-      available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
-      booking_time_zone: bookingTimeZone,
-      business_hours_text: businessHoursText,
-      ai_voice_name: agentName,
-      ai_disclosure: `Hi, this is ${agentName}, the AI assistant for this business. How can I help?`,
-      existing_number_kind: existingNumberKind,
-      porting_status: phoneSetupMode === "port_existing" ? portingStatus : "not_started",
-      phone_setup_owner_approved: ownerApproved,
-      phone_setup_notes: phoneSetupNotes || null
-    })
+    .update(businessPayload)
     .eq("id", businessId);
 
   if (businessError) return { error: businessError.message };
@@ -630,16 +754,9 @@ export async function updateAdminAccount(_state: AdminAccountState, formData: Fo
     radius_miles: Math.round(radiusMiles),
     require_owner_approval_outside_radius: allowOutsideRadius
   };
-  const { data: radiusRule, error: radiusReadError } = await admin.supabase
-    .from("service_radius_rules")
-    .select("id")
-    .eq("business_id", businessId)
-    .limit(1)
-    .maybeSingle();
-  if (radiusReadError) return { error: radiusReadError.message };
 
-  const { error: radiusError } = radiusRule?.id
-    ? await admin.supabase.from("service_radius_rules").update(radiusPayload).eq("id", radiusRule.id)
+  const { error: radiusError } = beforeRadiusRule?.id
+    ? await admin.supabase.from("service_radius_rules").update(radiusPayload).eq("id", beforeRadiusRule.id)
     : await admin.supabase.from("service_radius_rules").insert(radiusPayload);
   if (radiusError) return { error: radiusError.message };
 
@@ -657,6 +774,76 @@ export async function updateAdminAccount(_state: AdminAccountState, formData: Fo
     { onConflict: "business_id" }
   );
   if (billingError) return { error: billingError.message };
+
+  const auditContext = await requestAuditContext(admin.actorRole, admin.userId);
+  if (
+    beforeBusiness?.twilio_routing_phone !== twilioRoutingPhone ||
+    beforeBusiness?.messaging_service_sid !== (messagingServiceSid || null)
+  ) {
+    await recordAuditEvent(admin.supabase, {
+      ...auditContext,
+      action: "admin_twilio_numbers_updated",
+      after: {
+        messaging_service_sid: messagingServiceSid || null,
+        twilio_routing_phone: twilioRoutingPhone
+      },
+      before: {
+        messaging_service_sid: beforeBusiness?.messaging_service_sid ?? null,
+        twilio_routing_phone: beforeBusiness?.twilio_routing_phone ?? null
+      },
+      businessId,
+      entityId: businessId,
+      entityType: "business"
+    });
+  }
+
+  if (beforeBusiness?.owner_summary_language !== ownerSummaryLanguage) {
+    await recordAuditEvent(admin.supabase, {
+      ...auditContext,
+      action: "summary_language_changed",
+      after: { owner_summary_language: ownerSummaryLanguage },
+      before: { owner_summary_language: beforeBusiness?.owner_summary_language ?? null },
+      businessId,
+      entityId: businessId,
+      entityType: "business"
+    });
+  }
+
+  if (
+    beforeRadiusRule?.radius_miles !== radiusPayload.radius_miles ||
+    beforeRadiusRule?.allow_outside_radius !== radiusPayload.allow_outside_radius ||
+    beforeRadiusRule?.require_owner_approval_outside_radius !== radiusPayload.require_owner_approval_outside_radius
+  ) {
+    await recordAuditEvent(admin.supabase, {
+      ...auditContext,
+      action: "service_radius_changed",
+      after: {
+        allow_outside_radius: radiusPayload.allow_outside_radius,
+        radius_miles: radiusPayload.radius_miles,
+        require_owner_approval_outside_radius: radiusPayload.require_owner_approval_outside_radius
+      },
+      before: {
+        allow_outside_radius: beforeRadiusRule?.allow_outside_radius ?? null,
+        radius_miles: beforeRadiusRule?.radius_miles ?? null,
+        require_owner_approval_outside_radius: beforeRadiusRule?.require_owner_approval_outside_radius ?? null
+      },
+      businessId,
+      entityId: beforeRadiusRule?.id ?? businessId,
+      entityType: "service_radius_rule"
+    });
+  }
+
+  if (ownerId && beforeOwner?.phone !== (ownerPhone || null)) {
+    await recordAuditEvent(admin.supabase, {
+      ...auditContext,
+      action: "owner_phone_changed",
+      after: { phone: ownerPhone || null },
+      before: { phone: beforeOwner?.phone ?? null },
+      businessId,
+      entityId: ownerId,
+      entityType: "user"
+    });
+  }
 
   revalidatePath("/admin");
   revalidatePath("/owner");

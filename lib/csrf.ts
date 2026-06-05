@@ -12,7 +12,7 @@ type CsrfPayload = {
 };
 
 function csrfSecret() {
-  const secret = process.env.CSRF_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.TWILIO_AUTH_TOKEN || process.env.OPENAI_API_KEY;
+  const secret = process.env.CSRF_SECRET;
 
   if (!secret && process.env.NODE_ENV === "production") {
     throw new Error("CSRF_SECRET must be configured in production.");

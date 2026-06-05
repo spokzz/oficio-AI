@@ -1,5 +1,7 @@
 # Integration Plan
 
+Environment separation is required for every integration. Before configuring webhooks or API keys, set `OFICIO_ENV`, `OFICIO_SUPABASE_PROJECT_REF`, provider `*_ENV` labels, and the matching Supabase/Twilio/OpenAI credentials for that environment. See `docs/environment-separation.md`.
+
 ## Twilio Voice
 
 Inbound calls should hit a webhook that returns TwiML with `<Connect><Stream>` to the voice gateway. The gateway streams audio between Twilio and OpenAI Realtime.

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { assertSupabaseEnvironmentSafety } from "@/lib/environment";
 
 export function createAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -11,6 +12,8 @@ export function createAdminClient() {
   if (!serviceRoleKey || serviceRoleKey.startsWith("your-")) {
     throw new Error("Replace SUPABASE_SERVICE_ROLE_KEY in .env.local with your real Supabase service role key, then restart npm run dev.");
   }
+
+  assertSupabaseEnvironmentSafety({ service: "supabase-admin" });
 
   return createClient(url, serviceRoleKey, {
     auth: {

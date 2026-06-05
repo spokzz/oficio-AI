@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { assertProviderEnvironmentSafety } from "@/lib/environment";
 
 export type TwilioForm = Record<string, string>;
 
@@ -18,6 +19,12 @@ export async function parseTwilioForm(request: Request): Promise<TwilioForm> {
 export function validateTwilioSignature(request: Request, params: TwilioForm) {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!authToken) return false;
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_TWILIO_LOCAL",
+    provider: "Twilio",
+    providerEnvironment: process.env.TWILIO_ENV,
+    service: "twilio-webhook"
+  });
 
   const signature = request.headers.get("x-twilio-signature");
   if (!signature) return false;
@@ -95,6 +102,12 @@ export async function sendTwilioSms({ to, body }: { to: string; body: string }) 
   if (!accountSid || !authToken) {
     throw new Error("TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required to send SMS.");
   }
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_TWILIO_LOCAL",
+    provider: "Twilio",
+    providerEnvironment: process.env.TWILIO_ENV,
+    service: "twilio-sms"
+  });
 
   if (!messagingServiceSid && !fromPhone) {
     throw new Error("Set TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_PHONE to send SMS.");

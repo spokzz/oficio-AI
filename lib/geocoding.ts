@@ -1,3 +1,5 @@
+import { assertProviderEnvironmentSafety } from "@/lib/environment";
+
 export type GeocodedAddress = {
   accuracy: number | null;
   formattedAddress: string;
@@ -56,6 +58,12 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult> {
   if (!apiKey) {
     return { error: "GEOCODIO_API_KEY is not configured.", ok: false, skipped: "missing_api_key" };
   }
+  assertProviderEnvironmentSafety({
+    allowProductionInLocalEnvName: "OFICIO_ALLOW_PRODUCTION_GEOCODIO_LOCAL",
+    provider: "Geocodio",
+    providerEnvironment: process.env.GEOCODIO_KEY_ENV,
+    service: "geocoding"
+  });
 
   const url = new URL(GEOCODIO_ENDPOINT);
   url.searchParams.set("q", query);
