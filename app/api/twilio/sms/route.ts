@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePhoneCustomer, findBusinessRoutingContext, upsertCallerContact } from "@/lib/call-routing";
 import { normalizePhone } from "@/lib/phone";
-import { parseTwilioForm, reserveTwilioWebhookEvent, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
+import { businessSmsSender, parseTwilioForm, reserveTwilioWebhookEvent, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
 import { auditContextFromHeaders, recordAuditEvent, type AuditContext } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -187,8 +187,14 @@ async function handleOwnerBookingConfirmation({
     }
 
     try {
+      const { data: businessSender } = await supabase
+        .from("businesses")
+        .select("messaging_service_sid,twilio_routing_phone")
+        .eq("id", confirmation.business_id)
+        .maybeSingle<{ messaging_service_sid: string | null; twilio_routing_phone: string | null }>();
       const sent = await sendTwilioSms({
         body: confirmation.customer_confirmation_body,
+        ...businessSmsSender(businessSender),
         to: customerPhone
       });
       customerMessageSid = sent.sid;
@@ -199,7 +205,7 @@ async function handleOwnerBookingConfirmation({
         channel: "sms",
         customer_id: confirmation.customer_id,
         direction: "outbound",
-        from_phone: toPhone,
+        from_phone: sent.from ?? toPhone,
         job_id: confirmation.job_id,
         language: null,
         provider_message_id: customerMessageSid,
@@ -396,6 +402,7 @@ export async function POST(request: Request) {
         try {
           await sendTwilioSms({
             body: summary,
+            ...businessSmsSender(routingContext.business),
             to: routingContext.ownerPhone
           });
         } catch {

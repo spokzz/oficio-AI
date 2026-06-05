@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendTwilioSms } from "@/lib/twilio";
+import { businessSmsSender, sendTwilioSms } from "@/lib/twilio";
 
 export const runtime = "nodejs";
 
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   const { data: confirmations, error } = await supabase
     .from("owner_contact_confirmations")
-    .select("id,call_session_id,owner_phone,prompt_body")
+    .select("id,business_id,call_session_id,owner_phone,prompt_body")
     .eq("status", "pending")
     .lte("due_at", new Date().toISOString())
     .order("due_at", { ascending: true })
@@ -32,8 +32,14 @@ export async function POST(request: Request) {
 
   for (const confirmation of confirmations ?? []) {
     try {
+      const { data: businessSender } = await supabase
+        .from("businesses")
+        .select("messaging_service_sid,twilio_routing_phone")
+        .eq("id", String(confirmation.business_id))
+        .maybeSingle<{ messaging_service_sid: string | null; twilio_routing_phone: string | null }>();
       const sent = await sendTwilioSms({
         body: String(confirmation.prompt_body),
+        ...businessSmsSender(businessSender),
         to: String(confirmation.owner_phone)
       });
 

@@ -892,11 +892,11 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
             </label>
             <label className="field">
               <span>Twilio routing number</span>
-              <input name="twilioRoutingPhone" placeholder="+13125559876" type="tel" />
+              <input name="twilioRoutingPhone" placeholder="Client Twilio number, e.g. +13125559876" type="tel" />
             </label>
             <label className="field">
               <span>Owner private cell for transfers</span>
-              <input name="ownerTransferPhone" placeholder="+13125554321" type="tel" />
+              <input name="ownerTransferPhone" placeholder="Owner real phone, e.g. +13125554321" type="tel" />
             </label>
             <label className="field">
               <span>Messaging Service SID</span>
@@ -1339,11 +1339,11 @@ function EditAccountModal({
           </label>
           <label className="field">
             <span>Twilio routing number</span>
-            <input defaultValue={account.twilio_routing_phone ?? ""} name="twilioRoutingPhone" type="tel" />
+            <input defaultValue={account.twilio_routing_phone ?? ""} name="twilioRoutingPhone" placeholder="Client Twilio number, e.g. +13125559876" type="tel" />
           </label>
           <label className="field">
             <span>Owner transfer cell</span>
-            <input defaultValue={account.owner_transfer_phone ?? ""} name="ownerTransferPhone" type="tel" />
+            <input defaultValue={account.owner_transfer_phone ?? ""} name="ownerTransferPhone" placeholder="Owner real phone, e.g. +13125554321" type="tel" />
           </label>
           <label className="field">
             <span>Messaging Service SID</span>
@@ -1626,11 +1626,11 @@ function PhoneSetupForm({ account, csrfToken }: { account: AdminAccount; csrfTok
           </label>
           <label className="field">
             <span>Twilio routing number</span>
-            <input defaultValue={account.twilio_routing_phone ?? ""} name="twilioRoutingPhone" placeholder="+13125559876" type="tel" />
+            <input defaultValue={account.twilio_routing_phone ?? ""} name="twilioRoutingPhone" placeholder="Client Twilio number, e.g. +13125559876" type="tel" />
           </label>
           <label className="field">
             <span>Owner transfer cell</span>
-            <input defaultValue={account.owner_transfer_phone ?? account.owners[0]?.phone ?? ""} name="ownerTransferPhone" placeholder="+13125554321" type="tel" />
+            <input defaultValue={account.owner_transfer_phone ?? account.owners[0]?.phone ?? ""} name="ownerTransferPhone" placeholder="Owner real phone, e.g. +13125554321" type="tel" />
           </label>
           <label className="field">
             <span>Messaging Service SID</span>

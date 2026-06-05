@@ -136,6 +136,10 @@ const twilioSource = fs.readFileSync(new URL("../lib/twilio.ts", import.meta.url
 assert.equal(twilioSource.includes("if (!authToken) return true"), false, "Twilio webhook validation must not allow requests when TWILIO_AUTH_TOKEN is missing");
 assert.equal(twilioSource.includes("if (!authToken) return false"), true, "Twilio webhook validation should fail closed when TWILIO_AUTH_TOKEN is missing");
 assert.equal(twilioSource.includes("TWILIO_WEBHOOK_BASE_URL"), true, "Twilio signature validation should support the public webhook URL Twilio called");
+assert.equal(twilioSource.includes("businessSmsSender"), true, "Twilio SMS should support per-business sender configuration");
+assert.equal(twilioSource.includes("messagingServiceSid || process.env.TWILIO_MESSAGING_SERVICE_SID"), true, "Business Messaging Service SID should override the global fallback");
+assert.equal(twilioSource.includes("fromPhone || process.env.TWILIO_FROM_PHONE"), true, "Business Twilio phone should override the global fallback sender");
+assert.equal(twilioSource.includes("payload.from"), true, "SMS sends should return the actual Twilio sender when available");
 
 for (const route of [
   "../app/api/twilio/voice/route.ts",
@@ -157,9 +161,11 @@ assert.equal(phoneSource.includes("phone?.trim()"), false, "Phone search values 
 const callRoutingSource = fs.readFileSync(new URL("../lib/call-routing.ts", import.meta.url), "utf8");
 assert.equal(callRoutingSource.includes(".or(filters)"), false, "Call routing should not build raw PostgREST OR filter strings from phone input");
 assert.equal(callRoutingSource.includes('.in("twilio_routing_phone", phones)'), true, "Call routing should use fixed-column phone lookups");
+assert.equal(callRoutingSource.includes("messaging_service_sid"), true, "Call routing should load per-business Messaging Service SID for outbound SMS");
 
 const twilioSmsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
 assert.equal(twilioSmsRouteSource.includes("reserveTwilioWebhookEvent(params.MessageSid"), true, "SMS webhooks should dedupe Twilio MessageSid before side effects");
+assert.equal(twilioSmsRouteSource.includes("businessSmsSender"), true, "SMS webhooks should send outbound replies from the configured business sender");
 
 const realtimeGatewaySource = fs.readFileSync(new URL("../scripts/voice-realtime-server.mjs", import.meta.url), "utf8");
 assert.equal(realtimeGatewaySource.includes("IDLE_NO_AUDIO_TIMEOUT_MS = Number(process.env.OFICIO_IDLE_NO_AUDIO_TIMEOUT_MS || 15 * 1000)"), true, "Realtime gateway should default no-audio timeout to 15 seconds");
@@ -173,6 +179,8 @@ assert.equal(realtimeGatewaySource.includes("booking_id: job.id"), false, "Realt
 assert.equal(realtimeGatewaySource.includes("assertSupabaseEnvironmentSafety"), true, "Realtime gateway should enforce Supabase environment separation");
 assert.equal(realtimeGatewaySource.includes("assertProviderEnvironmentSafety"), true, "Realtime gateway should enforce provider environment labels");
 assert.equal(realtimeGatewaySource.includes("assertNoProtectedSecrets(instructions"), true, "Realtime gateway should check Ana instructions for protected secrets");
+assert.equal(realtimeGatewaySource.includes("businessSmsSender"), true, "Realtime gateway SMS should prefer per-business Twilio sender configuration");
+assert.equal(realtimeGatewaySource.includes("messaging_service_sid"), true, "Realtime gateway should load per-business Messaging Service SID");
 
 const smsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
 assert.equal(smsRouteSource.includes("validCustomerConfirmationSms"), true, "Customer confirmation SMS should be template-validated before sending");

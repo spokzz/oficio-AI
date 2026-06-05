@@ -802,13 +802,20 @@ function addressConfirmedValue(value) {
   return value === true || String(value).toLowerCase() === "true";
 }
 
-async function sendTwilioSms({ body, to }) {
+function businessSmsSender(business) {
+  return {
+    fromPhone: business?.twilio_routing_phone || null,
+    messagingServiceSid: business?.messaging_service_sid || null
+  };
+}
+
+async function sendTwilioSms({ body, fromPhone, messagingServiceSid, to }) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  const fromPhone = process.env.TWILIO_FROM_PHONE;
+  const selectedMessagingServiceSid = messagingServiceSid || process.env.TWILIO_MESSAGING_SERVICE_SID;
+  const selectedFromPhone = fromPhone || process.env.TWILIO_FROM_PHONE;
 
-  if (!accountSid || !authToken || (!messagingServiceSid && !fromPhone)) {
+  if (!accountSid || !authToken || (!selectedMessagingServiceSid && !selectedFromPhone)) {
     return { ok: false, skipped: "sms_not_configured" };
   }
   assertProviderEnvironmentSafety({
@@ -823,10 +830,10 @@ async function sendTwilioSms({ body, to }) {
     To: to
   });
 
-  if (messagingServiceSid) {
-    params.set("MessagingServiceSid", messagingServiceSid);
+  if (selectedMessagingServiceSid) {
+    params.set("MessagingServiceSid", selectedMessagingServiceSid);
   } else {
-    params.set("From", fromPhone);
+    params.set("From", selectedFromPhone);
   }
 
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
@@ -844,7 +851,7 @@ async function sendTwilioSms({ body, to }) {
   }
 
   const payload = await response.json().catch(() => ({}));
-  return { ok: true, sid: payload.sid || null };
+  return { from: payload.from || selectedFromPhone || null, ok: true, sid: payload.sid || null };
 }
 
 async function sendOwnerEmail({ body, subject, to }) {
@@ -886,6 +893,7 @@ async function sendOwnerEmail({ body, subject, to }) {
 
 async function notifyOwnerSummary({
   actionNeeded,
+  business,
   businessId,
   callSessionId,
   customerId,
@@ -948,7 +956,7 @@ async function notifyOwnerSummary({
     return { ok: true, sms: { ok: false, skipped: "owner_phone_missing" } };
   }
 
-  const sms = await sendTwilioSms({ body, to: ownerPhone });
+  const sms = await sendTwilioSms({ body, ...businessSmsSender(business), to: ownerPhone });
 
   return { ok: true, sms };
 }
@@ -990,7 +998,7 @@ async function getBusinessContext(businessId) {
   const { data: business, error } = await supabase
     .from("businesses")
     .select(
-      "id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,owner_summary_channel,available_services,booking_time_zone,business_hours_text,ai_voice_name,ai_disclosure,base_address,base_lat,base_lng"
+      "id,name,trade,phone,messaging_service_sid,twilio_routing_phone,owner_transfer_phone,owner_summary_language,owner_summary_channel,available_services,booking_time_zone,business_hours_text,ai_voice_name,ai_disclosure,base_address,base_lat,base_lng"
     )
     .eq("id", businessId)
     .maybeSingle();
@@ -1817,7 +1825,7 @@ async function createOwnerBookingConfirmation({
     timeZone
   });
 
-  const sms = await sendTwilioSms({ body: promptBody, to: ownerPhone });
+  const sms = await sendTwilioSms({ body: promptBody, ...businessSmsSender(business), to: ownerPhone });
 
   const { data: confirmation, error } = await supabase
     .from("owner_booking_confirmations")
@@ -2094,14 +2102,15 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 	      status: ownerApproval.ok ? "approval" : "lead"
 	    });
 
-	    await notifyOwnerSummary({
-	      businessId,
-	      callSessionId,
-	      customerId: customer.id,
-	      ownerMessageBody,
-	      ownerEmail,
-	      ownerPhone,
-	      summary,
+    await notifyOwnerSummary({
+      business,
+      businessId,
+      callSessionId,
+      customerId: customer.id,
+      ownerMessageBody,
+      ownerEmail,
+      ownerPhone,
+      summary,
       summaryChannel: business.owner_summary_channel,
       summaryLanguage: language,
       supabase
@@ -2246,6 +2255,7 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
 
   const notification = await notifyOwnerSummary({
     actionNeeded,
+    business,
     businessId,
     callSessionId,
     customerId: customer.id,

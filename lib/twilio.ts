@@ -93,11 +93,36 @@ export function sayAndHangup(message: string) {
   return `<Response><Say>${xmlEscape(message)}</Say><Hangup /></Response>`;
 }
 
-export async function sendTwilioSms({ to, body }: { to: string; body: string }) {
+export type TwilioSmsSender = {
+  fromPhone?: string | null;
+  messagingServiceSid?: string | null;
+};
+
+export function businessSmsSender(business?: {
+  messaging_service_sid?: string | null;
+  twilio_routing_phone?: string | null;
+} | null): TwilioSmsSender {
+  return {
+    fromPhone: business?.twilio_routing_phone ?? null,
+    messagingServiceSid: business?.messaging_service_sid ?? null
+  };
+}
+
+export async function sendTwilioSms({
+  body,
+  fromPhone,
+  messagingServiceSid,
+  to
+}: {
+  body: string;
+  fromPhone?: string | null;
+  messagingServiceSid?: string | null;
+  to: string;
+}) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  const fromPhone = process.env.TWILIO_FROM_PHONE;
+  const selectedMessagingServiceSid = messagingServiceSid || process.env.TWILIO_MESSAGING_SERVICE_SID;
+  const selectedFromPhone = fromPhone || process.env.TWILIO_FROM_PHONE;
 
   if (!accountSid || !authToken) {
     throw new Error("TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required to send SMS.");
@@ -109,8 +134,8 @@ export async function sendTwilioSms({ to, body }: { to: string; body: string }) 
     service: "twilio-sms"
   });
 
-  if (!messagingServiceSid && !fromPhone) {
-    throw new Error("Set TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_PHONE to send SMS.");
+  if (!selectedMessagingServiceSid && !selectedFromPhone) {
+    throw new Error("Set a business Messaging Service SID, business Twilio routing phone, TWILIO_MESSAGING_SERVICE_SID, or TWILIO_FROM_PHONE to send SMS.");
   }
 
   const params = new URLSearchParams({
@@ -118,10 +143,10 @@ export async function sendTwilioSms({ to, body }: { to: string; body: string }) 
     To: to
   });
 
-  if (messagingServiceSid) {
-    params.set("MessagingServiceSid", messagingServiceSid);
-  } else if (fromPhone) {
-    params.set("From", fromPhone);
+  if (selectedMessagingServiceSid) {
+    params.set("MessagingServiceSid", selectedMessagingServiceSid);
+  } else if (selectedFromPhone) {
+    params.set("From", selectedFromPhone);
   }
 
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
@@ -133,10 +158,10 @@ export async function sendTwilioSms({ to, body }: { to: string; body: string }) 
     method: "POST"
   });
 
-  const payload = (await response.json()) as { sid?: string; message?: string };
+  const payload = (await response.json()) as { from?: string; sid?: string; message?: string };
   if (!response.ok) {
     throw new Error(payload.message ?? `Twilio SMS failed with ${response.status}.`);
   }
 
-  return { sid: payload.sid ?? null };
+  return { from: payload.from ?? selectedFromPhone ?? null, sid: payload.sid ?? null };
 }

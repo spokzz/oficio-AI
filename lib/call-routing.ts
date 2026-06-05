@@ -10,6 +10,7 @@ export type RoutingBusiness = {
   name: string;
   trade: string;
   phone: string | null;
+  messaging_service_sid: string | null;
   twilio_routing_phone: string | null;
   owner_transfer_phone: string | null;
   owner_summary_language?: string | null;
@@ -136,7 +137,7 @@ export async function findBusinessRoutingContext(toPhone: string | null | undefi
 
   const { data: routingBusiness, error: routingBusinessError } = await supabase
     .from("businesses")
-    .select("id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
+    .select("id,name,trade,phone,messaging_service_sid,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
     .in("twilio_routing_phone", phones)
     .limit(1)
     .maybeSingle<RoutingBusiness>();
@@ -146,7 +147,7 @@ export async function findBusinessRoutingContext(toPhone: string | null | undefi
     ? { data: null, error: null }
     : await supabase
         .from("businesses")
-        .select("id,name,trade,phone,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
+        .select("id,name,trade,phone,messaging_service_sid,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
         .in("phone", phones)
         .limit(1)
         .maybeSingle<RoutingBusiness>();
