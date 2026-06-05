@@ -185,6 +185,11 @@ assert.equal(realtimeGatewaySource.includes("messaging_service_sid"), true, "Rea
 const smsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
 assert.equal(smsRouteSource.includes("validCustomerConfirmationSms"), true, "Customer confirmation SMS should be template-validated before sending");
 
+const diagnosticsAuthRouteSource = fs.readFileSync(new URL("../app/api/diagnostics/auth/route.ts", import.meta.url), "utf8");
+assert.equal(diagnosticsAuthRouteSource.includes("INTERNAL_WEBHOOK_SECRET"), true, "Auth diagnostics endpoint should require the internal webhook secret");
+assert.equal(diagnosticsAuthRouteSource.includes("SUPABASE_SERVICE_ROLE_KEY"), true, "Auth diagnostics should report service key metadata without exposing the key value");
+assert.equal(diagnosticsAuthRouteSource.includes("process.env.SUPABASE_SERVICE_ROLE_KEY }"), false, "Auth diagnostics should not render the raw Supabase service key");
+
 const migrationsDirectory = new URL("../supabase/migrations/", import.meta.url);
 const migrationSql = fs
   .readdirSync(migrationsDirectory)
