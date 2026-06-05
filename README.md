@@ -96,6 +96,62 @@ Then follow:
 
 - `docs/supabase-setup.md`
 
+## Production Deploy
+
+Deploy the Next.js app to Vercel and the realtime voice gateway to Fly.io. Twilio should call Vercel webhooks first; Vercel validates the Twilio signature, creates the call session, and returns TwiML that streams audio to Fly.
+
+### Fly Voice Gateway
+
+The Fly app is configured by:
+
+- `fly.toml`
+- `Dockerfile`
+- `.dockerignore`
+
+The Fly container runs:
+
+```bash
+npm run voice:realtime
+```
+
+Deploy with:
+
+```bash
+fly secrets import < .env.vercel.production
+fly secrets set OFICIO_NEXT_APP_ORIGIN=https://theoficio.com OFICIO_VOICE_GATEWAY_PORT=8787
+fly deploy
+```
+
+The production websocket URL is:
+
+```text
+wss://oficio-voice.fly.dev/twilio/voice
+```
+
+Set that value in Vercel production:
+
+```bash
+OFICIO_VOICE_STREAM_URL=wss://oficio-voice.fly.dev/twilio/voice
+```
+
+### Twilio Production Webhooks
+
+Configure every client Twilio number with the same webhook URLs:
+
+```text
+Voice webhook: https://theoficio.com/api/twilio/voice
+Voice status callback: https://theoficio.com/api/twilio/voice/status
+SMS webhook: https://theoficio.com/api/twilio/sms
+```
+
+Use `HTTP POST` for all three. Do not point Twilio directly at Fly.
+
+Client-specific Twilio numbers are stored in the `businesses` row:
+
+- `twilio_routing_phone` - client Twilio number
+- `owner_transfer_phone` - owner's real phone for transfers and summaries
+- `messaging_service_sid` - optional Twilio Messaging Service SID
+
 ## Production Integration Targets
 
 The Next.js app now reads core dashboard data from Supabase through authenticated server-side queries and RLS. Remaining production integrations:
