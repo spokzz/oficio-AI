@@ -7,9 +7,9 @@ export default function NoBusinessPage() {
       <section className="auth-visual" aria-label="Oficio AI setup needed">
         <div className="auth-visual-copy">
           <h2>
-            Simplify management with our <span className="hero-highlight">dashboard</span>.
+            Run your business from one <span className="hero-highlight">dashboard</span>.
           </h2>
-          <p>Ana answers calls and texts, books jobs, and sends you clear Spanish summaries.</p>
+          <p>Ana answers calls, books jobs, and sends every job summary in Spanish or English.</p>
         </div>
         <Image
           alt=""

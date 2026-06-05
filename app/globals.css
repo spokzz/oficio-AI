@@ -152,6 +152,7 @@ p {
   min-height: 680px;
   overflow: hidden;
   padding: clamp(34px, 4.7vw, 68px);
+  position: relative;
   width: calc(100vw - 12px);
 }
 
@@ -180,9 +181,7 @@ p {
 }
 
 .auth-visual::after {
-  background:
-    radial-gradient(circle at 50% 92%, rgba(255, 244, 236, 0.45), transparent 34%),
-    linear-gradient(180deg, rgba(255, 129, 46, 0) 0%, rgba(254, 116, 29, 0.04) 58%, rgba(253, 199, 157, 0.28) 100%);
+  background: linear-gradient(180deg, rgba(255, 129, 46, 0) 0%, rgba(254, 116, 29, 0.04) 58%, rgba(253, 199, 157, 0.28) 100%);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -259,15 +258,17 @@ p {
 }
 
 .login-language-toggle {
-  background: #f3f5f2;
-  border: 1px solid var(--border);
+  background: var(--white);
+  border: 1px solid rgba(213, 203, 193, 0.82);
   border-radius: 999px;
+  box-shadow: 0 12px 30px rgba(77, 46, 18, 0.12);
   display: inline-flex;
   gap: 4px;
   padding: 5px;
   position: absolute;
-  right: 0;
-  top: 0;
+  right: clamp(24px, 4vw, 68px);
+  top: clamp(24px, 3.8vw, 68px);
+  z-index: 5;
 }
 
 .login-language-toggle button {
@@ -317,8 +318,9 @@ p {
 }
 
 .auth-logo-row img {
-  height: clamp(54px, 5.8vh, 62px);
-  max-width: 280px;
+  height: clamp(88px, 11vh, 126px);
+  mix-blend-mode: multiply;
+  max-width: 430px;
   object-fit: contain;
   width: auto;
 }
@@ -350,6 +352,23 @@ p {
   gap: 7px;
 }
 
+.auth-input-field {
+  position: relative;
+}
+
+.auth-input-field > svg,
+.password-field > .auth-field-icon {
+  color: #9ba29d;
+  height: 23px;
+  left: 28px;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 23px;
+  z-index: 1;
+}
+
 .field span {
   color: var(--green-950);
   font-size: 13px;
@@ -370,6 +389,11 @@ p {
   min-height: clamp(72px, 7.9vh, 84px);
   padding: 0 34px;
   width: 100%;
+}
+
+.auth-input-field input,
+.password-field input {
+  padding-left: 68px;
 }
 
 .auth-form input:-webkit-autofill,
@@ -417,7 +441,7 @@ p {
   width: 44px;
 }
 
-.password-field svg {
+.password-field button svg {
   fill: none;
   height: 22px;
   stroke: currentColor;
@@ -438,6 +462,41 @@ p {
   min-height: clamp(72px, 7.9vh, 84px);
   margin-top: clamp(32px, 3.2vh, 34px);
   width: 100%;
+}
+
+.auth-create-account,
+.mobile-create-account {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 800;
+  padding: 0;
+}
+
+.auth-create-account {
+  justify-self: center;
+  margin: 18px auto 0;
+}
+
+.auth-legal {
+  color: #9ba29d;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: clamp(28px, 3.4vh, 36px) auto 0;
+  max-width: 430px;
+}
+
+.auth-legal a {
+  color: var(--orange-700);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.mobile-visual-login,
+.mobile-create-account {
+  display: none;
 }
 
 .forgot-link {
@@ -545,8 +604,8 @@ p {
   }
 
   .auth-logo-row img {
-    height: 44px;
-    max-width: 220px;
+    height: 76px;
+    max-width: 300px;
   }
 
   .auth-card h1 {
@@ -582,8 +641,18 @@ p {
     padding: 0 28px;
   }
 
+  .auth-input-field input,
+  .password-field input {
+    padding-left: 60px;
+  }
+
   .password-field input {
     padding-right: 62px;
+  }
+
+  .auth-input-field > svg,
+  .password-field > .auth-field-icon {
+    left: 22px;
   }
 
   .password-field button {
@@ -2995,32 +3064,69 @@ p {
 }
 
 @media (max-width: 680px) {
+  html,
+  body {
+    background: linear-gradient(145deg, #ff812e 0%, #fe741d 58%, #fdc79d 100%);
+  }
+
   .auth-page {
-    border-radius: 24px;
-    gap: 14px;
-    margin: 8px;
-    min-height: calc(100svh - 16px);
-    padding: 10px;
-    width: calc(100vw - 16px);
+    background: linear-gradient(145deg, #ff812e 0%, #fe741d 58%, #fdc79d 100%);
+    border-radius: 0;
+    box-shadow: none;
+    gap: 0;
+    height: 100svh;
+    margin: 0;
+    min-height: 100svh;
+    overflow: hidden;
+    padding: 0;
+    width: 100vw;
+  }
+
+  .auth-page:not(.mobile-form-open)::before {
+    background: linear-gradient(145deg, #ff812e 0%, #fe741d 58%, #fdc79d 100%);
+    content: "";
+    inset: -100px 0;
+    pointer-events: none;
+    position: fixed;
+    z-index: -1;
   }
 
   .auth-visual {
-    border-radius: 22px;
-    min-height: 470px;
-    padding: 24px;
+    border-radius: 0;
+    height: 100svh;
+    min-height: 100svh;
+    padding: 106px 26px 34px;
+  }
+
+  .auth-page:not(.mobile-form-open) .auth-panel {
+    display: none;
+  }
+
+  .auth-page.mobile-form-open {
+    background: var(--white);
+    overflow-y: auto;
+  }
+
+  .auth-page.mobile-form-open::before {
+    display: none;
+  }
+
+  .auth-page.mobile-form-open .auth-visual {
+    display: none;
   }
 
   .auth-visual-copy h2 {
-    font-size: 28px;
-    line-height: 1.3;
-    max-width: 300px;
+    font-size: 41px;
+    line-height: 1.32;
+    max-width: 340px;
     overflow-wrap: break-word;
   }
 
   .auth-visual-copy p {
-    font-size: 15px;
-    margin-top: 18px;
-    max-width: 290px;
+    font-size: 16px;
+    line-height: 1.55;
+    margin-top: 22px;
+    max-width: 330px;
   }
 
   .hero-highlight {
@@ -3028,21 +3134,35 @@ p {
   }
 
   .auth-owners-image {
-    bottom: -8px;
-    max-width: min(86%, 330px);
+    bottom: 136px;
+    max-width: min(86%, 372px);
     width: 86%;
   }
 
-  .auth-panel,
+  .auth-panel {
+    background: var(--white);
+    display: flex;
+    min-height: 100svh;
+    padding: 110px 28px 28px;
+    scroll-margin-top: 0;
+  }
+
   .portal-main {
     padding: 58px 14px 22px;
   }
 
   .login-language-toggle {
-    left: 50%;
-    right: auto;
-    top: 0;
-    transform: translateX(-50%);
+    left: auto;
+    position: fixed;
+    right: 20px;
+    top: max(20px, env(safe-area-inset-top));
+    transform: none;
+  }
+
+  .login-language-toggle button {
+    font-size: 12px;
+    min-height: 31px;
+    padding: 6px 10px;
   }
 
   .auth-card {
@@ -3064,13 +3184,79 @@ p {
   }
 
   .auth-logo-row img {
-    height: 48px;
+    height: 74px;
+    max-width: 300px;
   }
 
   .auth-form input,
   .auth-submit {
+    border-radius: 17px;
     height: 62px;
     min-height: 62px;
+  }
+
+  .auth-form input {
+    font-size: 16px;
+    padding: 0 22px;
+  }
+
+  .auth-input-field input,
+  .password-field input {
+    padding-left: 58px;
+  }
+
+  .password-field input {
+    padding-right: 62px;
+  }
+
+  .auth-input-field > svg,
+  .password-field > .auth-field-icon {
+    height: 21px;
+    left: 22px;
+    width: 21px;
+  }
+
+  .password-field button {
+    right: 12px;
+  }
+
+  .mobile-visual-login {
+    align-items: center;
+    background: linear-gradient(135deg, #ff6d1f, #e9570a);
+    border: 0;
+    border-radius: 16px;
+    bottom: 48px;
+    color: var(--white);
+    display: flex;
+    font-size: 18px;
+    font-weight: 800;
+    height: 74px;
+    justify-content: center;
+    left: 26px;
+    position: absolute;
+    right: 26px;
+    z-index: 3;
+  }
+
+  .mobile-create-account {
+    bottom: 14px;
+    color: var(--muted);
+    display: block;
+    left: 0;
+    position: absolute;
+    right: 0;
+    z-index: 3;
+  }
+
+  .auth-create-account {
+    display: block;
+    margin-top: 16px;
+  }
+
+  .auth-legal {
+    font-size: 12px;
+    margin-top: 30px;
+    max-width: 310px;
   }
 
   .portal-topbar,
@@ -3175,5 +3361,199 @@ p {
   .modal-panel {
     max-height: calc(100svh - 24px);
     padding: 18px;
+  }
+}
+
+@media (max-width: 940px) and (orientation: landscape) {
+  html,
+  body {
+    background: linear-gradient(145deg, #ff812e 0%, #fe741d 58%, #fdc79d 100%);
+  }
+
+  .auth-page {
+    background: linear-gradient(145deg, #ff812e 0%, #fe741d 58%, #fdc79d 100%);
+    border-radius: 0;
+    box-shadow: none;
+    gap: 0;
+    grid-template-columns: 1fr;
+    height: 100svh;
+    margin: 0;
+    min-height: 100svh;
+    overflow: hidden;
+    padding: 0;
+    width: 100vw;
+  }
+
+  .auth-page:not(.mobile-form-open) .auth-panel {
+    display: none;
+  }
+
+  .auth-page.mobile-form-open {
+    background: var(--white);
+    overflow-y: auto;
+  }
+
+  .auth-page.mobile-form-open .auth-visual {
+    display: none;
+  }
+
+  .auth-visual {
+    border-radius: 0;
+    height: 100svh;
+    min-height: 100svh;
+    padding: 74px 36px 28px;
+  }
+
+  .auth-visual-copy h2 {
+    font-size: 34px;
+    line-height: 1.18;
+    max-width: 520px;
+  }
+
+  .auth-visual-copy p {
+    font-size: 15px;
+    line-height: 1.42;
+    margin-top: 16px;
+    max-width: 460px;
+  }
+
+  .auth-owners-image {
+    bottom: 82px;
+    left: auto;
+    max-width: min(36%, 330px);
+    right: 38px;
+    transform: none;
+    width: 36%;
+  }
+
+  .mobile-visual-login {
+    align-items: center;
+    background: linear-gradient(135deg, #ff6d1f, #e9570a);
+    border: 0;
+    border-radius: 15px;
+    bottom: 18px;
+    color: var(--white);
+    display: flex;
+    font-size: 17px;
+    font-weight: 800;
+    height: 58px;
+    justify-content: center;
+    left: 36px;
+    position: absolute;
+    right: 36px;
+    z-index: 3;
+  }
+
+  .mobile-create-account {
+    display: none;
+  }
+
+  .login-language-toggle {
+    left: auto;
+    position: fixed;
+    right: 18px;
+    top: max(12px, env(safe-area-inset-top));
+    transform: none;
+  }
+
+  .login-language-toggle button {
+    font-size: 12px;
+    min-height: 30px;
+    padding: 6px 10px;
+  }
+
+  .auth-panel {
+    align-items: center;
+    background: var(--white);
+    display: flex;
+    justify-content: center;
+    min-height: 100svh;
+    padding: 20px 34px;
+  }
+
+  .auth-card {
+    max-width: 460px;
+    padding: 0;
+  }
+
+  .auth-logo-row {
+    margin-bottom: 10px;
+  }
+
+  .auth-logo-row img {
+    height: 44px;
+    max-width: 220px;
+  }
+
+  .auth-card h1 {
+    font-size: 30px;
+    margin-bottom: 5px;
+  }
+
+  .auth-card .subcopy {
+    font-size: 14px;
+    margin-bottom: 14px;
+  }
+
+  .auth-form {
+    gap: 10px;
+  }
+
+  .auth-form input,
+  .auth-submit {
+    border-radius: 14px;
+    height: 50px;
+    min-height: 50px;
+  }
+
+  .auth-form input {
+    font-size: 15px;
+    padding: 0 18px;
+  }
+
+  .auth-input-field input,
+  .password-field input {
+    padding-left: 50px;
+  }
+
+  .password-field input {
+    padding-right: 54px;
+  }
+
+  .auth-input-field > svg,
+  .password-field > .auth-field-icon {
+    height: 19px;
+    left: 20px;
+    width: 19px;
+  }
+
+  .password-field button {
+    height: 40px;
+    right: 8px;
+    width: 40px;
+  }
+
+  .forgot-link {
+    font-size: 13px;
+  }
+
+  .auth-submit {
+    margin-top: 10px;
+  }
+
+  .auth-create-account {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .auth-legal {
+    font-size: 11px;
+    line-height: 1.35;
+    margin-top: 14px;
+    max-width: 360px;
+  }
+
+  .auth-footnote {
+    display: none;
   }
 }

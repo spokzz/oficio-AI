@@ -134,9 +134,9 @@ export function ResetPasswordCard({ error, portal }: ResetPasswordCardProps) {
       <section className="auth-visual" aria-label="Oficio AI password reset">
         <div className="auth-visual-copy">
           <h2>
-            Simplify management with our <span className="hero-highlight">dashboard</span>.
+            Run your business from one <span className="hero-highlight">dashboard</span>.
           </h2>
-          <p>Ana answers calls and texts, books jobs, and sends you clear Spanish summaries.</p>
+          <p>Ana answers calls, books jobs, and sends every job summary in Spanish or English.</p>
         </div>
         <Image
           alt=""
@@ -153,7 +153,7 @@ export function ResetPasswordCard({ error, portal }: ResetPasswordCardProps) {
       <section className="auth-panel">
         <div className="auth-card">
           <div className="auth-logo-row">
-            <Image alt="Oficio AI" height={54} priority src="/brand/oficio-ai-logo.svg" width={240} />
+            <Image alt="Oficio AI - Never miss a job." height={140} priority src="/brand/oficio-logo.svg" width={420} />
           </div>
           <h1>Reset password</h1>
           <p className="subcopy">Choose a new password for your Oficio AI account.</p>

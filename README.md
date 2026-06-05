@@ -168,7 +168,7 @@ The Next.js app now reads core dashboard data from Supabase through authenticate
 
 Logo files:
 
-- `public/brand/oficio-ai-logo.svg`
+- `public/brand/oficio-logo.svg`
 - `public/brand/oficio-ai-mark.svg`
 
 Palette:

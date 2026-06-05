@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useActionState, useState, type FormEvent, type ReactNode } from "react";
+import { LockKeyhole, Mail } from "lucide-react";
+import { useActionState, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
 
@@ -22,13 +23,13 @@ const loginCopy = {
   owner: {
     en: {
       heroTitle: "Never miss a job by language.",
-      heroBody: "Ana answers calls and texts, books jobs, and sends you clear Spanish summaries.",
+      heroBody: "Ana answers calls, books jobs, and sends every job summary in Spanish or English.",
       welcome: "Welcome Back",
       subtitle: "Please login to your account",
       email: "Email address",
       password: "Password",
       forgot: "Forgot password?",
-      submit: "Login",
+      submit: "Log in",
       pending: "Signing in...",
       resetTitle: "Reset password",
       resetSubtitle: "Enter your owner email and we'll send a reset link.",
@@ -39,13 +40,13 @@ const loginCopy = {
     },
     es: {
       heroTitle: "Nunca pierdas un trabajo por el idioma.",
-      heroBody: "Ana contesta llamadas y textos, agenda trabajos y te manda resúmenes claros en español.",
+      heroBody: "Ana contesta llamadas, agenda trabajos y envía el resumen de cada trabajo en español o inglés.",
       welcome: "Bienvenido",
       subtitle: "Inicia sesión en tu cuenta",
       email: "Correo electrónico",
       password: "Contraseña",
       forgot: "¿Olvidaste tu contraseña?",
-      submit: "Entrar",
+      submit: "Log in",
       pending: "Entrando...",
       resetTitle: "Restablecer contraseña",
       resetSubtitle: "Escribe tu correo de dueño y enviaremos un enlace.",
@@ -64,7 +65,7 @@ const loginCopy = {
       email: "Email address",
       password: "Password",
       forgot: "Forgot password?",
-      submit: "Login",
+      submit: "Log in",
       pending: "Signing in...",
       resetTitle: "Reset password",
       resetSubtitle: "Enter your admin email and we'll send a reset link.",
@@ -100,7 +101,7 @@ function HeroTitle({ language, variant }: { language: LoginLanguage; variant: "o
   if (variant === "owner" && language === "en") {
     return (
       <>
-        Simplify management with our <span className="hero-highlight">dashboard</span>.
+        Run your business from one <span className="hero-highlight">dashboard</span>.
       </>
     );
   }
@@ -108,7 +109,7 @@ function HeroTitle({ language, variant }: { language: LoginLanguage; variant: "o
   if (variant === "owner") {
     return (
       <>
-        Simplifica la gestión con nuestro <span className="hero-highlight">panel</span>.
+        Maneja tu negocio desde un solo <span className="hero-highlight">panel</span>.
       </>
     );
   }
@@ -124,12 +125,29 @@ export function LoginCard({
   children
 }: LoginCardProps) {
   const [language, setLanguage] = useState<LoginLanguage>("en");
+  const [showMobileForm, setShowMobileForm] = useState(false);
   const [isResetMode, setIsResetMode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [state, formAction] = useActionState(action, {});
   const [resetMessage, setResetMessage] = useState<{ error?: string; success?: string }>({});
   const [isSendingReset, setIsSendingReset] = useState(false);
   const copy = variant === "admin" ? loginCopy.admin.en : loginCopy.owner[language];
+
+  useEffect(() => {
+    let themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+
+    if (!themeMeta) {
+      themeMeta = document.createElement("meta");
+      themeMeta.name = "theme-color";
+      document.head.appendChild(themeMeta);
+    }
+
+    themeMeta.content = showMobileForm || isResetMode ? "#ffffff" : "#fe741d";
+
+    return () => {
+      themeMeta.content = "#faf7f1";
+    };
+  }, [isResetMode, showMobileForm]);
 
   function passwordResetSendError(message: string) {
     const normalizedMessage = message.toLowerCase();
@@ -189,8 +207,21 @@ export function LoginCard({
     setIsSendingReset(false);
   }
 
+  const languageToggle =
+    variant === "owner" ? (
+      <div className="login-language-toggle" role="group" aria-label="Login language">
+        <button className={language === "es" ? "active" : ""} onClick={() => setLanguage("es")} type="button">
+          Español
+        </button>
+        <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")} type="button">
+          English
+        </button>
+      </div>
+    ) : null;
+
   return (
-    <main className="auth-page">
+    <main className={`auth-page${showMobileForm ? " mobile-form-open" : ""}`}>
+      {languageToggle}
       <section className="auth-visual" aria-label="Oficio AI">
         <div className="auth-visual-copy">
           <h2>
@@ -208,22 +239,18 @@ export function LoginCard({
           unoptimized
           width={1448}
         />
+        <button className="mobile-visual-login" onClick={() => setShowMobileForm(true)} type="button">
+          {copy.submit}
+        </button>
+        <button className="mobile-create-account" type="button">
+          Create an account
+        </button>
       </section>
 
-      <section className="auth-panel">
-        {variant === "owner" ? (
-          <div className="login-language-toggle" role="group" aria-label="Login language">
-            <button className={language === "es" ? "active" : ""} onClick={() => setLanguage("es")} type="button">
-              Español
-            </button>
-            <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")} type="button">
-              English
-            </button>
-          </div>
-        ) : null}
+      <section className="auth-panel" id="login-panel">
         <div className="auth-card">
           <div className="auth-logo-row">
-            <Image alt="Oficio AI" height={54} priority src="/brand/oficio-ai-logo.svg" width={240} />
+            <Image alt="Oficio AI - Never miss a job." height={140} priority src="/brand/oficio-logo.svg" width={420} />
           </div>
           <h1>{isResetMode ? copy.resetTitle : copy.welcome}</h1>
           <p className="subcopy">{isResetMode ? copy.resetSubtitle : copy.subtitle}</p>
@@ -231,7 +258,8 @@ export function LoginCard({
           {isResetMode ? (
             <form className="auth-form" onSubmit={handleResetSubmit}>
               <input name="portal" type="hidden" value={variant} />
-              <label>
+              <label className="auth-input-field">
+                <Mail aria-hidden="true" />
                 <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
               </label>
               {resetMessage.error ? <p className="form-error">{resetMessage.error}</p> : null}
@@ -246,10 +274,12 @@ export function LoginCard({
           ) : (
             <form action={formAction} className="auth-form">
               {variant === "owner" ? <input name="language" type="hidden" value={language} /> : null}
-              <label>
+              <label className="auth-input-field">
+                <Mail aria-hidden="true" />
                 <input name="email" type="email" autoComplete="email" placeholder={copy.email} required />
               </label>
               <div className="password-field">
+                <LockKeyhole className="auth-field-icon" aria-hidden="true" />
                 <input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder={copy.password} required />
                 <button
                   aria-label={showPassword ? "Hide password" : "Show password"}
@@ -266,6 +296,16 @@ export function LoginCard({
               <SubmitButton label={copy.submit} pendingLabel={copy.pending} />
             </form>
           )}
+          {!isResetMode ? (
+            <>
+              <button className="auth-create-account" type="button">
+                Create an account
+              </button>
+              <p className="auth-legal">
+                By logging in, you agree to our <a href="#">Terms of Use</a> and <a href="#">Privacy Policy</a>.
+              </p>
+            </>
+          ) : null}
           <p className="auth-footnote">{copy.helper}</p>
           {children}
         </div>
