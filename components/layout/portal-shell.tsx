@@ -55,6 +55,7 @@ export function PortalShell({
   searchPlaceholder = "Search customers, jobs, quotes",
   showSearch = true,
   signOutLabel = "Sign out",
+  signOutRedirectTo = "/owner/login",
   topbarActions
 }: {
   title: string;
@@ -69,6 +70,7 @@ export function PortalShell({
   searchPlaceholder?: string;
   showSearch?: boolean;
   signOutLabel?: string;
+  signOutRedirectTo?: string;
   topbarActions?: ReactNode;
 }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -125,6 +127,7 @@ export function PortalShell({
           ))}
         </nav>
         <form action={signOutUser}>
+          <input name="redirectTo" type="hidden" value={signOutRedirectTo} />
           <button className="sidebar-signout" title={signOutLabel} type="submit">
             <span aria-hidden="true" className="signout-icon">
               <LogOut strokeWidth={2.2} />

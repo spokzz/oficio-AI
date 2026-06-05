@@ -184,8 +184,9 @@ export async function updatePassword(_state: PasswordResetState, formData: FormD
   redirect(`/${portal}/login?reset=success`);
 }
 
-export async function signOutUser() {
+export async function signOutUser(formData?: FormData) {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  redirect("/");
+  const redirectTo = String(formData?.get("redirectTo") ?? "/owner/login");
+  redirect(redirectTo.startsWith("/") ? redirectTo : "/owner/login");
 }

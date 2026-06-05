@@ -122,6 +122,7 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
       ]}
       showSearch={false}
       signOutLabel={copy.signOut}
+      signOutRedirectTo={`/owner/login?lang=${language}`}
       subtitle={copy.subtitle}
       topbarActions={
         activeTab === "home" ? (

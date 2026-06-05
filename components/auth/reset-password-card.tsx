@@ -75,6 +75,7 @@ export function ResetPasswordCard({ error, portal }: ResetPasswordCardProps) {
       if (sessionError) {
         setRecoveryError("This password reset link is invalid or expired. Request a new link.");
       } else {
+        window.localStorage.removeItem("oficio-password-reset-portal");
         url.hash = "";
         url.searchParams.delete("code");
         url.searchParams.delete("token_hash");
@@ -123,6 +124,7 @@ export function ResetPasswordCard({ error, portal }: ResetPasswordCardProps) {
       return;
     }
 
+    window.localStorage.removeItem("oficio-password-reset-portal");
     await supabase.auth.signOut();
     window.location.assign(`${loginHref}?reset=success`);
   }

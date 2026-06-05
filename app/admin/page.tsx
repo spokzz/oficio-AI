@@ -41,6 +41,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         active: item.tab === activeTab
       }))}
       showSearch={false}
+      signOutRedirectTo="/admin/login"
       subtitle="Set up owners, monitor accounts, tune AI behavior, and track manual billing."
       title={`Welcome, ${data.user.full_name?.split(" ")[0] ?? "Admin"}`}
     >

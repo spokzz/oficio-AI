@@ -28,6 +28,7 @@ export default function NoBusinessPage() {
           <h1>Your login is not connected yet</h1>
           <p className="subcopy">Ask an admin to connect this owner account to a business, then sign in again.</p>
           <form action={signOutUser}>
+            <input name="redirectTo" type="hidden" value="/owner/login" />
             <button className="button primary" type="submit">
               Sign out
             </button>

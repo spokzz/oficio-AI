@@ -172,6 +172,8 @@ export function LoginCard({
       return;
     }
 
+    window.localStorage.setItem("oficio-password-reset-portal", variant);
+
     const supabase = createClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/reset-password?portal=${variant}`
