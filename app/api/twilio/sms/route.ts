@@ -4,6 +4,12 @@ import { ensurePhoneCustomer, findBusinessRoutingContext, upsertCallerContact } 
 import { normalizePhone } from "@/lib/phone";
 import { businessSmsSender, parseTwilioForm, reserveTwilioWebhookEvent, sendTwilioSms, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
 import { auditContextFromHeaders, recordAuditEvent, type AuditContext } from "@/lib/audit";
+import {
+  findAuthorizedSmsOwner,
+  handleOwnerAssistantSms,
+  looksLikeOwnerAssistantRequest,
+  unauthorizedOwnerSmsReply
+} from "@/lib/owner-sms-assistant";
 
 export const runtime = "nodejs";
 
@@ -307,12 +313,13 @@ export async function POST(request: Request) {
   const ownerPhone = normalizePhone(params.From);
   const response = confirmationReply(params.Body ?? "");
   const routingContext = await findBusinessRoutingContext(params.To);
+  const authorizedOwner =
+    routingContext && ownerPhone ? await findAuthorizedSmsOwner(routingContext.business.id, ownerPhone) : null;
 
   if (routingContext && ownerPhone) {
-    const ownerContactPhone = normalizePhone(routingContext.ownerPhone) ?? normalizePhone(routingContext.owner?.phone);
     const ownerForward = forwardedMessage(params.Body ?? "");
 
-    if (ownerForward && ownerPhone === ownerContactPhone) {
+    if (ownerForward && authorizedOwner) {
       const supabase = createAdminClient();
       const customerId = await ensurePhoneCustomer({
         businessId: routingContext.business.id,
@@ -353,12 +360,34 @@ export async function POST(request: Request) {
       return twimlResponse(messageTwiml(`Logged. ${summary}`));
     }
 
-    if (!response && ownerPhone === ownerContactPhone && /^FWD\b/i.test(params.Body ?? "")) {
+    if (!response && authorizedOwner && /^FWD\b/i.test(params.Body ?? "")) {
       return twimlResponse(messageTwiml("Use: FWD +1CUSTOMERNUMBER then paste the customer's message."));
+    }
+
+    if (authorizedOwner && !response) {
+      const reply = await handleOwnerAssistantSms({
+        auditContext: auditContextFromHeaders(request.headers, "owner_sms", authorizedOwner.id),
+        body: params.Body ?? "",
+        messageSid: params.MessageSid || null,
+        owner: authorizedOwner,
+        routingContext
+      });
+      return twimlResponse(messageTwiml(reply));
+    }
+
+    if (!authorizedOwner && looksLikeOwnerAssistantRequest(params.Body ?? "")) {
+      await recordAuditEvent(createAdminClient(), {
+        ...auditContextFromHeaders(request.headers, "unauthorized_sms"),
+        action: "owner_sms_access_denied",
+        after: { from_phone: ownerPhone },
+        businessId: routingContext.business.id,
+        entityType: "owner_sms"
+      });
+      return twimlResponse(messageTwiml(unauthorizedOwnerSmsReply(params.Body ?? "", routingContext.business.owner_summary_language)));
     }
   }
 
-  if (!ownerPhone || !response) {
+  if (!ownerPhone || !response || !authorizedOwner || !routingContext) {
     if (routingContext) {
       const supabase = createAdminClient();
       const customerId = await ensurePhoneCustomer({
@@ -419,6 +448,7 @@ export async function POST(request: Request) {
     .from("owner_booking_confirmations")
     .select("id,business_id,job_id,customer_id,customer_phone,customer_confirmation_body")
     .eq("owner_phone", ownerPhone)
+    .eq("business_id", routingContext.business.id)
     .in("status", ["pending", "sent"])
     .order("created_at", { ascending: false })
     .limit(1)
@@ -441,6 +471,7 @@ export async function POST(request: Request) {
     .from("owner_contact_confirmations")
     .select("id,business_id,call_session_id,caller_phone")
     .eq("owner_phone", ownerPhone)
+    .eq("business_id", routingContext.business.id)
     .in("status", ["pending", "sent"])
     .order("created_at", { ascending: false })
     .limit(1)
@@ -451,7 +482,14 @@ export async function POST(request: Request) {
   }
 
   if (!confirmation) {
-    return twimlResponse(messageTwiml("Ana could not find a recent call to mark."));
+    const reply = await handleOwnerAssistantSms({
+      auditContext: auditContextFromHeaders(request.headers, "owner_sms", authorizedOwner.id),
+      body: params.Body ?? "",
+      messageSid: params.MessageSid || null,
+      owner: authorizedOwner,
+      routingContext
+    });
+    return twimlResponse(messageTwiml(reply));
   }
 
   const contactResponse = response === "yes" ? "yes_personal" : "no_business";

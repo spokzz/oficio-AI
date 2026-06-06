@@ -26,16 +26,18 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   const { data: call } = await supabase
     .from("call_sessions")
-    .select("id,business_id,contact_type,qualified_business_seconds")
+    .select("id,business_id,contact_type,qualified_business_seconds,screening_result")
     .eq("provider_call_id", providerCallId)
-    .maybeSingle<{ id: string; business_id: string; contact_type: string; qualified_business_seconds: number }>();
+    .maybeSingle<{ id: string; business_id: string; contact_type: string; qualified_business_seconds: number; screening_result: string | null }>();
 
   if (!call) {
     return NextResponse.json({ ok: true, skipped: "unknown_call" });
   }
 
   const duration = Number(params.CallDuration ?? params.Duration ?? 0);
-  const qualifiedSeconds = call.contact_type === "customer" && Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 0;
+  const usedAiReceptionist = !call.screening_result?.startsWith("monthly_limit_");
+  const qualifiedSeconds =
+    call.contact_type === "customer" && usedAiReceptionist && Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 0;
 
   const { error: updateError } = await supabase
     .from("call_sessions")

@@ -9,6 +9,7 @@ export type JobStatus = "lead" | "pending" | "confirmed" | "in_progress" | "comp
 export type QuoteStatus = "draft" | "needs_owner_approval" | "approved" | "sent" | "accepted" | "declined" | "expired";
 export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
 export type OwnerSummaryChannel = "sms" | "email";
+export type MinuteLimitPolicy = "continue_overage" | "voicemail" | "forward_owner";
 
 export type UserProfile = {
   id: string;
@@ -31,6 +32,7 @@ export type Business = {
   voice_setup_status: VoiceSetupStatus;
   sms_setup_status: SmsSetupStatus;
   messaging_service_sid: string | null;
+  minute_limit_policy: MinuteLimitPolicy;
   phone_setup_notes: string | null;
   existing_number_kind: ExistingNumberKind;
   porting_status: PortingStatus;
@@ -74,6 +76,9 @@ export type ManualBillingAccount = {
   business_id: string;
   plan_name: string;
   monthly_price: number;
+  included_minutes: number;
+  overage_starts_at_minutes: number;
+  overage_rate_per_minute: number;
   onboarding_fee: number;
   onboarding_paid: boolean;
   billing_status: string;
@@ -194,6 +199,9 @@ export type CallSession = {
   ended_at: string | null;
   outcome: string | null;
   transcript: string | null;
+  voicemail_recording_sid?: string | null;
+  voicemail_recording_url?: string | null;
+  voicemail_recording_duration_seconds?: number | null;
   job_id?: string | null;
   customers?: Pick<Customer, "full_name" | "phone"> | null;
   jobs?: Pick<Job, "address" | "scheduled_start" | "service_type" | "status"> | null;

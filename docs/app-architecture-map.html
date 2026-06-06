@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oficio AI App Architecture Map</title>
+  <style>
+    :root {
+      --ink: #1e2420;
+      --muted: #6b6256;
+      --line: #d9d4c9;
+      --paper: #f7f5ef;
+      --panel: #ffffff;
+      --green: #173f35;
+      --green-2: #2f7a55;
+      --gold: #f6c85f;
+      --blue: #3d6f91;
+      --red: #b84a3a;
+      --shadow: 0 16px 40px rgba(30, 36, 32, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    a {
+      color: var(--green-2);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+      gap: 28px;
+      align-items: stretch;
+      padding: 30px;
+      background: var(--green);
+      color: white;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: clamp(32px, 5vw, 60px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 780px;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 18px;
+    }
+
+    .hero-meta {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .hero-meta div {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+      padding-bottom: 10px;
+    }
+
+    .hero-meta div:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .hero-meta span {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .hero-meta strong {
+      text-align: right;
+      color: white;
+      font-weight: 650;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 18px 0 26px;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    section {
+      margin-top: 26px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 18px;
+      margin-bottom: 14px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .section-head p {
+      max-width: 680px;
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: #e9f1ec;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid.cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 8px 22px rgba(30, 36, 32, 0.04);
+    }
+
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .panel p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .panel ul,
+    .panel ol {
+      margin: 10px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    .panel li + li {
+      margin-top: 6px;
+    }
+
+    .callout {
+      border-left: 5px solid var(--gold);
+      background: #fff9e7;
+    }
+
+    .risk {
+      border-left: 5px solid var(--red);
+      background: #fff7f5;
+    }
+
+    .diagram {
+      overflow-x: auto;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .diagram svg {
+      display: block;
+      width: 100%;
+      min-width: 980px;
+      height: auto;
+    }
+
+    .node rect,
+    .lane rect {
+      rx: 8;
+      ry: 8;
+    }
+
+    .node text,
+    .lane text,
+    .flow-label {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .node-title {
+      font-weight: 750;
+      font-size: 15px;
+      fill: var(--ink);
+    }
+
+    .node-body {
+      font-size: 12px;
+      fill: #5e665f;
+    }
+
+    .lane-title {
+      font-size: 13px;
+      font-weight: 800;
+      fill: var(--green);
+      text-transform: uppercase;
+    }
+
+    .flow-line {
+      stroke: #62726a;
+      stroke-width: 2.2;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .flow-line.green {
+      stroke: var(--green-2);
+    }
+
+    .flow-line.blue {
+      stroke: var(--blue);
+    }
+
+    .flow-line.red {
+      stroke: var(--red);
+    }
+
+    .flow-label {
+      font-size: 12px;
+      fill: #516057;
+      font-weight: 650;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 820px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf3ef;
+      color: var(--green);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code,
+    pre {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    code {
+      color: var(--green);
+      background: #edf3ef;
+      border-radius: 5px;
+      padding: 2px 5px;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      white-space: pre-wrap;
+      background: #17211d;
+      color: #eef5ef;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-x: auto;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+      counter-reset: step;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--green);
+      color: white;
+      font-weight: 800;
+    }
+
+    .step h3 {
+      margin: 0 0 4px;
+      font-size: 16px;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .template-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .footer {
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 860px) {
+      .hero,
+      .grid.cols-2,
+      .grid.cols-3,
+      .template-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding: 22px;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .tag {
+        margin-top: 10px;
+      }
+    }
+
+    @media print {
+      body {
+        background: white;
+      }
+
+      .page {
+        width: 100%;
+        padding: 0;
+      }
+
+      .hero,
+      .panel,
+      .diagram,
+      .step,
+      .table-wrap {
+        box-shadow: none;
+      }
+
+      .nav {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <h1>Oficio AI App Architecture Map</h1>
+        <p>One-page operating view of the product, business flow, technical architecture, data model, integrations, and approval workflow for the AI receptionist and owner dashboard.</p>
+      </div>
+      <div class="hero-meta" aria-label="Document metadata">
+        <div><span>Audience</span><strong>Business analysts and system architects</strong></div>
+        <div><span>Product</span><strong>AI receptionist for home-service businesses</strong></div>
+        <div><span>Main outcome</span><strong>Capture calls, create leads/bookings, route approvals</strong></div>
+        <div><span>Source</span><strong>Current app implementation</strong></div>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Page sections">
+      <a href="#executive-summary">Executive Summary</a>
+      <a href="#business-flow">Business Flow</a>
+      <a href="#ba-diagram">BA Flow Diagram</a>
+      <a href="#system-architecture">System Architecture</a>
+      <a href="#technical-diagram">Technical Diagram</a>
+      <a href="#data-map">Data Map</a>
+      <a href="#message-templates">Message Templates</a>
+      <a href="#controls">Controls</a>
+    </nav>
+
+    <section id="executive-summary">
+      <div class="section-head">
+        <div>
+          <h2>Executive Summary</h2>
+          <p>Oficio AI answers business calls and texts, captures customer intent, creates customer/job records, asks the owner to approve bookings, and keeps the owner dashboard current from Supabase.</p>
+        </div>
+        <span class="tag">Current product behavior</span>
+      </div>
+
+      <div class="grid cols-3">
+        <article class="panel">
+          <h3>Customer Promise</h3>
+          <p>Ana answers quickly, speaks in the customer's language, collects job details, checks booking availability, and keeps the caller informed without exposing internal workflow.</p>
+        </article>
+        <article class="panel">
+          <h3>Owner Promise</h3>
+          <p>The owner receives clean summaries, pending booking approvals, leads, call logs, messages, and customer history in one dashboard.</p>
+        </article>
+        <article class="panel">
+          <h3>Approval Rule</h3>
+          <p>Ana creates a pending booking request first. The booking becomes confirmed only after the owner replies <code>YES</code>. A <code>NO</code> reply keeps it as a lead.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="business-flow">
+      <div class="section-head">
+        <div>
+          <h2>Business Analyst Flow</h2>
+          <p>This view explains the customer, owner, and operations journey without implementation detail.</p>
+        </div>
+        <span class="tag">Business process</span>
+      </div>
+
+      <div class="timeline">
+        <div class="step">
+          <div>
+            <h3>Admin configures the business</h3>
+            <p>Operations sets business name, owner contact, public/routing phone numbers, SMS state, services, service area, hours, timezone, AI name, summary language, and summary method.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Customer calls or texts</h3>
+            <p>Twilio receives the inbound phone interaction. Calls go to Ana through the voice route. Texts go to the SMS route or can be forwarded by an owner in SMS transition mode.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Ana screens and handles the interaction</h3>
+            <p>Ana checks if the caller is known, personal, vendor, spam, or a customer. Personal/vendor calls can transfer to the owner; business calls continue through intake.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Ana collects service details</h3>
+            <p>Ana asks for name, phone if needed, service type, confirmed address, preferred time, and source. She checks business hours, closed dates, existing bookings, and service radius.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Ana writes records to the database</h3>
+            <p>The app stores or updates the customer, call session, message log, AI summary, and either a lead or a pending booking request.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Owner receives action request</h3>
+            <p>For a booking, the owner receives an SMS approval prompt and replies <code>YES</code> or <code>NO</code>. For non-booking leads, the owner receives a summary by the configured summary method.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Booking is confirmed or kept as a lead</h3>
+            <p><code>YES</code> confirms the job and sends the customer a confirmation SMS. <code>NO</code> moves the request to leads and no customer confirmation is sent.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Dashboard reflects the latest state</h3>
+            <p>The owner dashboard reads jobs, customers, messages, call sessions, summaries, quotes, settings, and usage from Supabase.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="ba-diagram">
+      <div class="section-head">
+        <div>
+          <h2>Business Flow Diagram</h2>
+          <p>A lane-based view of the customer-to-owner approval journey.</p>
+        </div>
+        <span class="tag">For BA team</span>
+      </div>
+
+      <div class="diagram" role="img" aria-label="Business analyst flow diagram">
+        <svg viewBox="0 0 1180 560" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#62726a"></path>
+            </marker>
+          </defs>
+
+          <g class="lane">
+            <rect x="20" y="30" width="1140" height="100" fill="#f3f7f4" stroke="#d9d4c9"></rect>
+            <text x="38" y="62" class="lane-title">Customer</text>
+          </g>
+          <g class="lane">
+            <rect x="20" y="150" width="1140" height="130" fill="#ffffff" stroke="#d9d4c9"></rect>
+            <text x="38" y="182" class="lane-title">Ana</text>
+          </g>
+          <g class="lane">
+            <rect x="20" y="300" width="1140" height="105" fill="#f3f7f4" stroke="#d9d4c9"></rect>
+            <text x="38" y="332" class="lane-title">Owner</text>
+          </g>
+          <g class="lane">
+            <rect x="20" y="425" width="1140" height="105" fill="#ffffff" stroke="#d9d4c9"></rect>
+            <text x="38" y="457" class="lane-title">Dashboard</text>
+          </g>
+
+          <g class="node">
+            <rect x="130" y="54" width="150" height="58" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="146" y="79" class="node-title">Calls business</text>
+            <text x="146" y="98" class="node-body">Phone or forwarded line</text>
+          </g>
+          <g class="node">
+            <rect x="335" y="174" width="160" height="74" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="353" y="200" class="node-title">Ana answers</text>
+            <text x="353" y="219" class="node-body">Screens caller</text>
+            <text x="353" y="237" class="node-body">Collects details</text>
+          </g>
+          <g class="node">
+            <rect x="560" y="174" width="170" height="74" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="578" y="200" class="node-title">Checks rules</text>
+            <text x="578" y="219" class="node-body">Hours, radius, slots</text>
+            <text x="578" y="237" class="node-body">Service catalog</text>
+          </g>
+          <g class="node">
+            <rect x="795" y="174" width="170" height="74" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="813" y="200" class="node-title">Creates request</text>
+            <text x="813" y="219" class="node-body">Customer + pending job</text>
+            <text x="813" y="237" class="node-body">Summary + call log</text>
+          </g>
+          <g class="node">
+            <rect x="795" y="321" width="170" height="62" fill="#fff9e7" stroke="#f6c85f" stroke-width="2"></rect>
+            <text x="813" y="346" class="node-title">Owner approval</text>
+            <text x="813" y="365" class="node-body">Reply YES or NO</text>
+          </g>
+          <g class="node">
+            <rect x="1000" y="54" width="140" height="58" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="1017" y="79" class="node-title">Gets update</text>
+            <text x="1017" y="98" class="node-body">Confirmed if YES</text>
+          </g>
+          <g class="node">
+            <rect x="795" y="450" width="170" height="58" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="813" y="475" class="node-title">UI updates</text>
+            <text x="813" y="494" class="node-body">Bookings, leads, calls</text>
+          </g>
+
+          <path d="M280 83 C320 83 310 211 335 211" class="flow-line green"></path>
+          <path d="M495 211 H560" class="flow-line blue"></path>
+          <path d="M730 211 H795" class="flow-line blue"></path>
+          <path d="M880 248 V321" class="flow-line"></path>
+          <path d="M965 352 C1020 352 1020 120 1070 112" class="flow-line green"></path>
+          <path d="M880 383 V450" class="flow-line green"></path>
+
+          <text x="990" y="280" class="flow-label">YES: confirm job + text customer</text>
+          <text x="990" y="302" class="flow-label">NO: keep as lead, no customer SMS</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="system-architecture">
+      <div class="section-head">
+        <div>
+          <h2>System Architect View</h2>
+          <p>This view maps the deployable services, API routes, data stores, background routes, and integration boundaries.</p>
+        </div>
+        <span class="tag">Technical architecture</span>
+      </div>
+
+      <div class="grid cols-3">
+        <article class="panel">
+          <h3>Frontend Surfaces</h3>
+          <ul>
+            <li><code>/owner</code>: owner dashboard for jobs, leads, customers, calls, messages, settings, reminders, usage.</li>
+            <li><code>/admin</code>: internal onboarding and account setup console.</li>
+            <li><code>/owner/login</code> and <code>/admin/login</code>: Supabase Auth login screens.</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h3>Application Layer</h3>
+          <ul>
+            <li>Next.js App Router handles UI, server actions, and Twilio HTTP webhooks.</li>
+            <li>Realtime voice gateway handles Twilio Media Streams and OpenAI Realtime WebSocket sessions.</li>
+            <li>Shared libraries normalize phone numbers, route calls, geocode, translate summaries, and load dashboard data.</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h3>External Services</h3>
+          <ul>
+            <li>Supabase Auth, Postgres, RLS, and service-role writes.</li>
+            <li>Twilio Voice, Media Streams, Messaging, and status callbacks.</li>
+            <li>OpenAI Realtime for voice and Responses API for summary rewriting/translation.</li>
+            <li>Geocodio for address validation and service radius checks.</li>
+            <li>Resend for owner email summaries when configured.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="technical-diagram">
+      <div class="section-head">
+        <div>
+          <h2>Technical Flow Diagram</h2>
+          <p>End-to-end runtime path for calls, database writes, owner approvals, and dashboard reads.</p>
+        </div>
+        <span class="tag">For architects</span>
+      </div>
+
+      <div class="diagram" role="img" aria-label="System architecture flow diagram">
+        <svg viewBox="0 0 1180 720" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#62726a"></path>
+            </marker>
+            <style>
+              .arch-line { stroke: #62726a; stroke-width: 2.2; fill: none; marker-end: url(#arrow2); }
+              .arch-green { stroke: #2f7a55; }
+              .arch-blue { stroke: #3d6f91; }
+              .arch-red { stroke: #b84a3a; }
+            </style>
+          </defs>
+
+          <g class="node">
+            <rect x="35" y="65" width="150" height="74" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="55" y="94" class="node-title">Customer</text>
+            <text x="55" y="114" class="node-body">Phone call or SMS</text>
+          </g>
+
+          <g class="node">
+            <rect x="245" y="65" width="160" height="74" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="265" y="94" class="node-title">Twilio</text>
+            <text x="265" y="114" class="node-body">Voice, SMS, callbacks</text>
+          </g>
+
+          <g class="node">
+            <rect x="470" y="35" width="210" height="88" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="490" y="64" class="node-title">Next.js API routes</text>
+            <text x="490" y="84" class="node-body">/api/twilio/voice</text>
+            <text x="490" y="102" class="node-body">/api/twilio/sms, status</text>
+          </g>
+
+          <g class="node">
+            <rect x="470" y="165" width="210" height="96" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="490" y="194" class="node-title">Voice gateway</text>
+            <text x="490" y="214" class="node-body">voice-realtime-server.mjs</text>
+            <text x="490" y="232" class="node-body">Twilio Media Stream proxy</text>
+            <text x="490" y="250" class="node-body">Active call registry</text>
+          </g>
+
+          <g class="node">
+            <rect x="760" y="165" width="170" height="96" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="780" y="194" class="node-title">OpenAI Realtime</text>
+            <text x="780" y="214" class="node-body">Ana voice session</text>
+            <text x="780" y="232" class="node-body">Tools: slots, booking</text>
+            <text x="780" y="250" class="node-body">summary, transfer</text>
+          </g>
+
+          <g class="node">
+            <rect x="760" y="35" width="170" height="88" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="780" y="64" class="node-title">Server actions</text>
+            <text x="780" y="84" class="node-body">Admin setup</text>
+            <text x="780" y="102" class="node-body">Owner settings</text>
+          </g>
+
+          <g class="node">
+            <rect x="470" y="330" width="210" height="150" fill="#f3f7f4" stroke="#173f35" stroke-width="2"></rect>
+            <text x="490" y="360" class="node-title">Supabase Postgres</text>
+            <text x="490" y="382" class="node-body">businesses, users</text>
+            <text x="490" y="400" class="node-body">customers, jobs</text>
+            <text x="490" y="418" class="node-body">messages, call_sessions</text>
+            <text x="490" y="436" class="node-body">ai_summaries</text>
+            <text x="490" y="454" class="node-body">owner_booking_confirmations</text>
+          </g>
+
+          <g class="node">
+            <rect x="760" y="330" width="170" height="96" fill="#ffffff" stroke="#f6c85f" stroke-width="2"></rect>
+            <text x="780" y="360" class="node-title">Notifications</text>
+            <text x="780" y="380" class="node-body">Twilio SMS</text>
+            <text x="780" y="398" class="node-body">Resend email summary</text>
+          </g>
+
+          <g class="node">
+            <rect x="985" y="330" width="155" height="96" fill="#fff9e7" stroke="#f6c85f" stroke-width="2"></rect>
+            <text x="1005" y="360" class="node-title">Owner</text>
+            <text x="1005" y="380" class="node-body">YES confirms</text>
+            <text x="1005" y="398" class="node-body">NO keeps lead</text>
+          </g>
+
+          <g class="node">
+            <rect x="245" y="565" width="205" height="88" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="265" y="594" class="node-title">Owner dashboard</text>
+            <text x="265" y="614" class="node-body">Reads dashboard data</text>
+            <text x="265" y="632" class="node-body">Mutates owner settings/jobs</text>
+          </g>
+
+          <g class="node">
+            <rect x="35" y="565" width="150" height="88" fill="#ffffff" stroke="#2f7a55" stroke-width="2"></rect>
+            <text x="55" y="594" class="node-title">Admin dashboard</text>
+            <text x="55" y="614" class="node-body">Onboarding</text>
+            <text x="55" y="632" class="node-body">Phone/SMS config</text>
+          </g>
+
+          <g class="node">
+            <rect x="760" y="505" width="170" height="78" fill="#ffffff" stroke="#3d6f91" stroke-width="2"></rect>
+            <text x="780" y="535" class="node-title">Geocodio</text>
+            <text x="780" y="555" class="node-body">Address validation</text>
+          </g>
+
+          <path d="M185 102 H245" class="arch-line arch-green"></path>
+          <path d="M405 102 H470" class="arch-line arch-green"></path>
+          <path d="M575 123 V165" class="arch-line arch-blue"></path>
+          <path d="M680 213 H760" class="arch-line arch-blue"></path>
+          <path d="M845 261 C845 300 675 292 620 330" class="arch-line arch-blue"></path>
+          <path d="M575 261 V330" class="arch-line arch-blue"></path>
+          <path d="M680 405 H760" class="arch-line arch-green"></path>
+          <path d="M930 378 H985" class="arch-line arch-green"></path>
+          <path d="M1062 330 C1062 280 325 285 325 139" class="arch-line arch-green"></path>
+          <path d="M1030 426 C1005 490 340 508 348 565" class="arch-line arch-green"></path>
+          <path d="M450 609 C515 609 530 480 575 480" class="arch-line"></path>
+          <path d="M185 609 H245" class="arch-line"></path>
+          <path d="M760 80 H680" class="arch-line"></path>
+          <path d="M575 330 C610 290 760 545 760 545" class="arch-line arch-blue"></path>
+
+          <text x="204" y="88" class="flow-label">inbound</text>
+          <text x="415" y="88" class="flow-label">webhook</text>
+          <text x="691" y="200" class="flow-label">audio + tools</text>
+          <text x="692" y="392" class="flow-label">approval/summary</text>
+          <text x="944" y="366" class="flow-label">SMS</text>
+          <text x="865" y="300" class="flow-label">owner reply returns to SMS webhook</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="data-map">
+      <div class="section-head">
+        <div>
+          <h2>Data Map</h2>
+          <p>Core Supabase tables and how the application uses them.</p>
+        </div>
+        <span class="tag">Database contract</span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Main Tables</th>
+              <th>Purpose</th>
+              <th>Primary Writers</th>
+              <th>Primary Readers</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Account setup</td>
+              <td><code>businesses</code>, <code>users</code>, <code>business_users</code>, <code>manual_billing_accounts</code></td>
+              <td>Business profile, owner membership, phone setup, summary settings, billing plan.</td>
+              <td>Admin server actions, owner settings actions.</td>
+              <td>Admin dashboard, owner dashboard, voice gateway.</td>
+            </tr>
+            <tr>
+              <td>Service rules</td>
+              <td><code>service_radius_rules</code>, <code>business_availability_exceptions</code></td>
+              <td>Service radius, outside-radius policy, closed dates, appointment availability constraints.</td>
+              <td>Admin actions, owner settings actions.</td>
+              <td>Ana realtime tools, owner dashboard.</td>
+            </tr>
+            <tr>
+              <td>Customer records</td>
+              <td><code>customers</code>, <code>caller_contacts</code></td>
+              <td>Customer profile, phone identity, known caller classification.</td>
+              <td>Ana voice/SMS flows, owner forms, owner confirmation replies.</td>
+              <td>Call routing, Ana context, owner dashboard.</td>
+            </tr>
+            <tr>
+              <td>Work pipeline</td>
+              <td><code>jobs</code>, <code>quotes</code>, <code>customer_recurring_reminders</code></td>
+              <td>Leads, pending booking requests, confirmed jobs, quote workflow, recurring service reminders.</td>
+              <td>Ana booking tools, owner dashboard forms, reminder route.</td>
+              <td>Owner dashboard, Ana availability checks.</td>
+            </tr>
+            <tr>
+              <td>Conversation history</td>
+              <td><code>call_sessions</code>, <code>messages</code>, <code>ai_summaries</code>, <code>ai_summary_translations</code></td>
+              <td>Call status, transcript, message logs, owner-facing summaries, localized summary display.</td>
+              <td>Twilio routes, voice gateway, summary translation logic.</td>
+              <td>Owner messages tab, call log, dashboard summary cards.</td>
+            </tr>
+            <tr>
+              <td>Approval workflow</td>
+              <td><code>owner_booking_confirmations</code>, <code>owner_contact_confirmations</code></td>
+              <td>Owner YES/NO approval for bookings and classification confirmation for unknown personal/business callers.</td>
+              <td>Voice gateway, due-confirmation route, SMS webhook.</td>
+              <td>SMS webhook, owner dashboard indirectly through job/call state.</td>
+            </tr>
+            <tr>
+              <td>Usage metering</td>
+              <td><code>usage_events</code></td>
+              <td>Qualified AI call minutes by business and month.</td>
+              <td>Twilio status callback.</td>
+              <td>Call allowance checks, admin and owner dashboards.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="message-templates">
+      <div class="section-head">
+        <div>
+          <h2>Message Templates</h2>
+          <p>The key outbound messages used in the current approval and summary flow.</p>
+        </div>
+        <span class="tag">Owner and customer communications</span>
+      </div>
+
+      <div class="template-grid">
+        <article class="panel">
+          <h3>Owner Booking Approval SMS</h3>
+          <p>Sent immediately when Ana creates a pending booking request.</p>
+          <pre>{Ana} booking request for {Business Name}:
+{Customer Name} ({Customer Phone})
+{Service} - {Requested Date/Time}
+Value: ${Estimated Value}
+Address: {Service Address}
+Reply YES to confirm and text the customer. Reply NO to keep it as a lead.</pre>
+        </article>
+
+        <article class="panel">
+          <h3>Customer Confirmation SMS</h3>
+          <p>Sent only after the owner replies <code>YES</code>.</p>
+          <pre>Hi {First Name}, this is {Ana} with {Business Name}. Your {Service} appointment is confirmed for {Requested Date/Time} at {Service Address}. Reply here if you need to update it.</pre>
+        </article>
+
+        <article class="panel">
+          <h3>Owner Summary SMS or Email</h3>
+          <p>Sent through the configured owner summary method for appointment requests or leads.</p>
+          <pre>Ana: New appointment request for {Service}
+
+Caller: {Customer Phone}
+Service: {Service}
+Requested: {Requested Date/Time}
+Name: {Customer Name}
+Address: {Service Address}
+
+Action: Review/approve before confirming.</pre>
+        </article>
+
+        <article class="panel">
+          <h3>Owner Contact Classification SMS</h3>
+          <p>Used when Ana transfers an unknown caller and needs the owner to classify the number.</p>
+          <pre>Was {Caller Phone} a personal contact? Reply YES to always send to me. Reply NO if this was a business caller.</pre>
+        </article>
+      </div>
+    </section>
+
+    <section id="controls">
+      <div class="section-head">
+        <div>
+          <h2>Controls, Rules, and Failure Paths</h2>
+          <p>Current guardrails that protect the business workflow and data quality.</p>
+        </div>
+        <span class="tag">Operational behavior</span>
+      </div>
+
+      <div class="grid cols-2">
+        <article class="panel callout">
+          <h3>Scheduling Guardrails</h3>
+          <ul>
+            <li>Ana must collect a real full name before saving a booking or lead.</li>
+            <li>Ana must confirm the service address verbally before booking.</li>
+            <li>Ana checks business hours, closed dates, available slots, and service catalog.</li>
+            <li>Ana checks service radius when base address and radius are configured.</li>
+            <li>Ana creates <code>pending</code> jobs for owner approval, not final bookings.</li>
+          </ul>
+        </article>
+
+        <article class="panel callout">
+          <h3>Routing Guardrails</h3>
+          <ul>
+            <li>Known spam is rejected.</li>
+            <li>Known personal/vendor callers are transferred to the owner.</li>
+            <li>Unknown callers can be screened and classified.</li>
+            <li>If monthly AI call allowance is exceeded, the voice route stops accepting AI receptionist calls.</li>
+            <li>If SMS approval fails, the pending request is downgraded to a lead for manual follow-up.</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <h3>Configuration Ownership</h3>
+          <ul>
+            <li>Admin owns onboarding, phone setup mode, routing numbers, Twilio Messaging Service SID, SMS/voice status, and billing plan.</li>
+            <li>Owner can adjust summary language, summary method, timezone, business hours, available services, service area, and booking records.</li>
+            <li>Supabase RLS limits dashboard reads/writes to authenticated members of the business.</li>
+          </ul>
+        </article>
+
+        <article class="panel risk">
+          <h3>Implementation Notes</h3>
+          <ul>
+            <li>Owner summary method can be SMS or email.</li>
+            <li>Booking approval is SMS-based because the owner must reply <code>YES</code> or <code>NO</code>.</li>
+            <li>SMS transition mode supports owner-forwarded texts using <code>FWD +1CUSTOMERNUMBER</code> plus the customer message.</li>
+            <li>Dashboard data freshness depends on Supabase reads and page refresh/revalidation behavior, not a separate event bus.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="code-map">
+      <div class="section-head">
+        <div>
+          <h2>Code Map</h2>
+          <p>Where the architecture lives in the repository.</p>
+        </div>
+        <span class="tag">Repository guide</span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Files</th>
+              <th>Responsibility</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Owner dashboard</td>
+              <td><code>app/owner/page.tsx</code>, <code>components/owner/owner-dashboard.tsx</code>, <code>lib/owner-data.ts</code></td>
+              <td>Authenticated dashboard UI and Supabase reads for jobs, customers, messages, calls, summaries, reminders, and usage.</td>
+            </tr>
+            <tr>
+              <td>Admin dashboard</td>
+              <td><code>app/admin/page.tsx</code>, <code>components/admin/admin-dashboard.tsx</code>, <code>app/actions/admin.ts</code></td>
+              <td>Internal onboarding, business setup, phone/SMS configuration, service area, and billing plan management.</td>
+            </tr>
+            <tr>
+              <td>Voice routing</td>
+              <td><code>app/api/twilio/voice/route.ts</code>, <code>app/api/twilio/voice/screen/route.ts</code>, <code>lib/call-routing.ts</code></td>
+              <td>Twilio voice webhook, known caller classification, call session creation, and transfer decisions.</td>
+            </tr>
+            <tr>
+              <td>Realtime Ana</td>
+              <td><code>scripts/voice-realtime-server.mjs</code>, <code>shared/active-voice-call-registry.js</code></td>
+              <td>Twilio Media Streams, OpenAI Realtime session, tool calls, booking creation, owner approval SMS, summaries, and call finalization.</td>
+            </tr>
+            <tr>
+              <td>SMS workflow</td>
+              <td><code>app/api/twilio/sms/route.ts</code>, <code>app/api/twilio/owner-confirmations/due/route.ts</code>, <code>lib/twilio.ts</code></td>
+              <td>Inbound SMS handling, owner YES/NO replies, forwarded SMS logging, outbound Twilio messages, and delayed contact confirmations.</td>
+            </tr>
+            <tr>
+              <td>Schema</td>
+              <td><code>supabase/migrations/*.sql</code>, <code>lib/types.ts</code></td>
+              <td>Database tables, RLS policies, indexes, and TypeScript data contracts.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="footer">Open this file directly in a browser or print it to PDF for stakeholder review. Last updated from the current repository architecture.</p>
+  </main>
+</body>
+</html>

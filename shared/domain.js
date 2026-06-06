@@ -1,10 +1,10 @@
 const earthRadiusMiles = 3958.8;
 
-export function toRadians(degrees) {
+function toRadians(degrees) {
   return degrees * (Math.PI / 180);
 }
 
-export function distanceMiles(origin, destination) {
+function distanceMiles(origin, destination) {
   const dLat = toRadians(destination.lat - origin.lat);
   const dLng = toRadians(destination.lng - origin.lng);
   const lat1 = toRadians(origin.lat);
@@ -68,9 +68,5 @@ export function estimateMonthlyGrossMargin({
     grossProfit: Number(grossProfit.toFixed(2)),
     marginPercent: Number((margin * 100).toFixed(1))
   };
-}
-
-export function referralMessage({ customerName, businessName, service }) {
-  return `Hi ${customerName}, thank you for choosing ${businessName} again. If you know a neighbor who needs ${service}, feel free to share our number. We appreciate referrals.`;
 }
 

@@ -76,10 +76,6 @@ export function twimlResponse(twiml: string, init?: ResponseInit) {
   });
 }
 
-export function emptyTwiml() {
-  return twimlResponse("<Response></Response>");
-}
-
 export function xmlEscape(value: string | null | undefined) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")

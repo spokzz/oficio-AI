@@ -48,7 +48,7 @@ export function createCsrfToken(userId: string) {
   return `${payload}.${signPayload(payload)}`;
 }
 
-export function verifyCsrfToken(token: string, userId: string) {
+function verifyCsrfToken(token: string, userId: string) {
   const [payload, signature, extra] = token.split(".");
 
   if (!payload || !signature || extra) {
@@ -67,19 +67,6 @@ export function verifyCsrfToken(token: string, userId: string) {
   }
 
   return parsed.userId === userId && Number.isFinite(parsed.exp) && parsed.exp >= Date.now();
-}
-
-export async function createCurrentUserCsrfToken() {
-  const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return "";
-  }
-
-  return createCsrfToken(user.id);
 }
 
 export async function validateCurrentUserCsrfToken(token: string | null | undefined) {

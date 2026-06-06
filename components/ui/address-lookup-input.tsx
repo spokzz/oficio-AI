@@ -12,23 +12,33 @@ export function AddressLookupInput({
   emptyLabel = "No matches",
   label,
   name,
+  onValueChange,
   placeholder = "123 Main St, Austin, TX",
-  required = false
+  required = false,
+  value: controlledValue
 }: {
   className?: string;
   defaultValue?: string | null;
   emptyLabel?: string;
   label: string;
   name: string;
+  onValueChange?: (value: string) => void;
   placeholder?: string;
   required?: boolean;
+  value?: string;
 }) {
-  const [value, setValue] = useState(defaultValue ?? "");
+  const [internalValue, setInternalValue] = useState(defaultValue ?? "");
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const hasUserEditedRef = useRef(false);
   const requestIdRef = useRef(0);
+  const value = controlledValue ?? internalValue;
+
+  const updateValue = (nextValue: string) => {
+    if (controlledValue === undefined) setInternalValue(nextValue);
+    onValueChange?.(nextValue);
+  };
 
   useEffect(() => {
     if (!hasUserEditedRef.current) return;
@@ -72,7 +82,7 @@ export function AddressLookupInput({
         onChange={(event) => {
           const nextValue = event.target.value;
           hasUserEditedRef.current = true;
-          setValue(nextValue);
+          updateValue(nextValue);
           if (nextValue.replace(/\s+/g, " ").trim().length < 4) {
             setSuggestions([]);
             setOpen(false);
@@ -96,7 +106,7 @@ export function AddressLookupInput({
                 key={suggestion.label}
                 onClick={() => {
                   hasUserEditedRef.current = false;
-                  setValue(suggestion.label);
+                  updateValue(suggestion.label);
                   setOpen(false);
                 }}
                 onMouseDown={(event) => event.preventDefault()}

@@ -4,9 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isCustomerSourceOption } from "@/lib/customer-sources";
 import { isServiceOption, serviceOptionDefaults } from "@/lib/services";
-import { normalizePhone } from "@/lib/phone";
 import { geocodeAddress } from "@/lib/geocoding";
-import type { ContactClassification } from "@/lib/types";
 import { validateCurrentUserCsrfToken, validateFormCsrfToken } from "@/lib/csrf";
 import { recordAuditEvent, requestAuditContext } from "@/lib/audit";
 
@@ -16,11 +14,6 @@ export type AddCustomerState = {
 };
 
 export type AddBookingState = {
-  error?: string;
-  success?: string;
-};
-
-export type MarkCallState = {
   error?: string;
   success?: string;
 };
@@ -40,9 +33,9 @@ export type OwnerClosureState = {
   success?: string;
 };
 
-const callClassificationOptions: ContactClassification[] = ["customer", "personal", "vendor", "spam", "unknown"];
 const ownerSummaryLanguages = ["en", "es"] as const;
 const ownerSummaryChannels = ["sms", "email"] as const;
+const minuteLimitPolicies = ["continue_overage", "voicemail", "forward_owner"] as const;
 const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidTimeZone(value: string) {
@@ -142,6 +135,7 @@ function ownerSettingsSnapshot(value: {
   available_services?: unknown;
   booking_time_zone?: unknown;
   business_hours_text?: unknown;
+  minute_limit_policy?: unknown;
   owner_summary_channel?: unknown;
   owner_summary_language?: unknown;
 }) {
@@ -149,6 +143,7 @@ function ownerSettingsSnapshot(value: {
     available_services: value.available_services,
     booking_time_zone: value.booking_time_zone,
     business_hours_text: value.business_hours_text,
+    minute_limit_policy: value.minute_limit_policy,
     owner_summary_channel: value.owner_summary_channel,
     owner_summary_language: value.owner_summary_language
   };
@@ -223,6 +218,7 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
   const ownerSummaryChannel = String(formData.get("ownerSummaryChannel") ?? "sms");
   const bookingTimeZone = String(formData.get("bookingTimeZone") ?? "America/Chicago").trim();
   const businessHoursText = String(formData.get("businessHoursText") ?? "").trim();
+  const minuteLimitPolicy = String(formData.get("minuteLimitPolicy") ?? "continue_overage");
   const availableServices = formData
     .getAll("availableServices")
     .map((service) => String(service))
@@ -248,6 +244,10 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
     return { error: "Choose at least one valid service." };
   }
 
+  if (!minuteLimitPolicies.includes(minuteLimitPolicy as (typeof minuteLimitPolicies)[number])) {
+    return { error: "Choose a valid monthly minute limit behavior." };
+  }
+
   const owner = await ownerBusinessId();
   if ("error" in owner) {
     return { error: owner.error };
@@ -255,18 +255,22 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
 
   const { data: beforeSettings, error: beforeSettingsError } = await owner.supabase
     .from("businesses")
-    .select("available_services,booking_time_zone,business_hours_text,owner_summary_channel,owner_summary_language")
+    .select("available_services,booking_time_zone,business_hours_text,minute_limit_policy,owner_summary_channel,owner_summary_language,owner_transfer_phone")
     .eq("id", owner.businessId)
     .maybeSingle();
 
   if (beforeSettingsError) {
     return { error: beforeSettingsError.message };
   }
+  if (minuteLimitPolicy === "forward_owner" && !beforeSettings?.owner_transfer_phone) {
+    return { error: "Ask Oficio Admin to add an owner transfer phone before selecting call forwarding." };
+  }
 
   const afterSettings = {
     available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
     booking_time_zone: bookingTimeZone,
     business_hours_text: businessHoursText,
+    minute_limit_policy: minuteLimitPolicy,
     owner_summary_channel: ownerSummaryChannel,
     owner_summary_language: ownerSummaryLanguage
   };
@@ -1074,112 +1078,4 @@ export async function deleteOwnerCustomer(customerId: string, csrfToken: string)
   revalidatePath("/owner");
 
   return { success: `${customer?.full_name ?? "Customer"} was deleted.` };
-}
-
-export async function markOwnerRecentCall(callSessionId: string, classification: ContactClassification, csrfToken: string): Promise<MarkCallState> {
-  const csrfError = await validateCurrentUserCsrfToken(csrfToken);
-  if (csrfError) return { error: csrfError };
-
-  const trimmedCallSessionId = callSessionId.trim();
-
-  if (!trimmedCallSessionId) {
-    return { error: "Call session id is required." };
-  }
-
-  if (!callClassificationOptions.includes(classification)) {
-    return { error: "Choose a valid call type." };
-  }
-
-  const owner = await ownerBusinessId();
-  if ("error" in owner) {
-    return { error: owner.error };
-  }
-
-  const { data: call, error: callError } = await owner.supabase
-    .from("call_sessions")
-    .select("id,from_phone,customer_id")
-    .eq("id", trimmedCallSessionId)
-    .eq("business_id", owner.businessId)
-    .maybeSingle<{ id: string; from_phone: string | null; customer_id: string | null }>();
-
-  if (callError || !call) {
-    return { error: callError?.message ?? "Could not find that call." };
-  }
-
-  const phone = normalizePhone(call.from_phone);
-  let customerId = call.customer_id;
-
-  if (classification === "customer" && phone && !customerId) {
-    const { data: existingCustomer, error: existingCustomerError } = await owner.supabase
-      .from("customers")
-      .select("id")
-      .eq("business_id", owner.businessId)
-      .eq("phone", phone)
-      .limit(1)
-      .maybeSingle<{ id: string }>();
-
-    if (existingCustomerError) {
-      return { error: existingCustomerError.message };
-    }
-
-    if (existingCustomer?.id) {
-      customerId = existingCustomer.id;
-    } else {
-      const { data: customer, error: customerError } = await owner.supabase
-        .from("customers")
-        .insert({
-          business_id: owner.businessId,
-          full_name: `Caller ${phone}`,
-          phone,
-          preferred_language: "auto",
-          referral_source: "other",
-          notes: "Created after owner marked a recent call as customer."
-        })
-        .select("id")
-        .single<{ id: string }>();
-
-      if (customerError || !customer) {
-        return { error: customerError?.message ?? "Could not create a customer for this call." };
-      }
-
-      customerId = customer.id;
-    }
-  }
-
-  const { error: callUpdateError } = await owner.supabase
-    .from("call_sessions")
-    .update({
-      contact_type: classification,
-      customer_id: classification === "customer" ? customerId : null,
-      needs_owner_review: false,
-      outcome: `Owner marked this call as ${classification}.`,
-      screening_result: `owner_marked_${classification}`
-    })
-    .eq("id", trimmedCallSessionId)
-    .eq("business_id", owner.businessId);
-
-  if (callUpdateError) {
-    return { error: callUpdateError.message };
-  }
-
-  if (phone) {
-    const { error: contactError } = await owner.supabase.from("caller_contacts").upsert(
-      {
-        business_id: owner.businessId,
-        phone,
-        classification,
-        customer_id: classification === "customer" ? customerId : null,
-        confirmed_by_owner_at: new Date().toISOString()
-      },
-      { onConflict: "business_id,phone" }
-    );
-
-    if (contactError) {
-      return { error: contactError.message };
-    }
-  }
-
-  revalidatePath("/owner");
-
-  return { success: `Call marked as ${classification}.` };
 }

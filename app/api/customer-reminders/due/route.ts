@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sendDueOwnerDailyAgendas } from "@/lib/daily-owner-agenda";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -173,8 +174,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await generateRecurringReminders();
-    return NextResponse.json({ ok: true, ...result });
+    const reminders = await generateRecurringReminders();
+    const agendas = await sendDueOwnerDailyAgendas();
+    return NextResponse.json({ agendas, ok: true, reminders });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not generate reminders." }, { status: 500 });
   }

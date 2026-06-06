@@ -4,12 +4,15 @@ export type AiCallPlan = {
   allowanceMinutes: number;
   key: AiCallPlanKey;
   label: string;
-  overageRatePerMinute: number | null;
+  monthlyPrice: number;
+  overageStartsAtMinutes: number;
+  overageRatePerMinute: number;
 };
 
 export type AiCallUsage = {
   allowanceMinutes: number;
   billableOverageMinutes: number;
+  graceMinutes: number;
   includedUsedMinutes: number;
   monthLabel: string;
   monthStart: string;
@@ -17,6 +20,7 @@ export type AiCallUsage = {
   overageAmount: number;
   overageMinutes: number;
   overageRatePerMinute: number | null;
+  overageStartsAtMinutes: number;
   planKey: AiCallPlanKey;
   planName: string;
   remainingMinutes: number;
@@ -24,24 +28,30 @@ export type AiCallUsage = {
   usedMinutes: number;
 };
 
-export const aiCallPlans: Record<AiCallPlanKey, AiCallPlan> = {
+const aiCallPlans: Record<AiCallPlanKey, AiCallPlan> = {
   basic: {
     allowanceMinutes: 100,
     key: "basic",
     label: "Basic",
-    overageRatePerMinute: null
+    monthlyPrice: 79,
+    overageStartsAtMinutes: 110,
+    overageRatePerMinute: 0.49
   },
   premium: {
     allowanceMinutes: 300,
     key: "premium",
     label: "Premium",
-    overageRatePerMinute: null
+    monthlyPrice: 149,
+    overageStartsAtMinutes: 320,
+    overageRatePerMinute: 0.39
   },
   vip: {
-    allowanceMinutes: 600,
+    allowanceMinutes: 750,
     key: "vip",
     label: "VIP",
-    overageRatePerMinute: 0.05
+    monthlyPrice: 249,
+    overageStartsAtMinutes: 800,
+    overageRatePerMinute: 0.29
   }
 };
 
@@ -51,7 +61,7 @@ export function normalizeAiCallPlan(planName?: string | null): AiCallPlan {
   const normalized = String(planName ?? "").trim().toLowerCase();
 
   if (normalized.includes("vip")) return aiCallPlans.vip;
-  if (normalized.includes("basic")) return aiCallPlans.basic;
+  if (normalized.includes("basic") || normalized.includes("básico") || normalized.includes("basico")) return aiCallPlans.basic;
   if (normalized.includes("premium") || normalized.includes("growth")) return aiCallPlans.premium;
 
   return aiCallPlans.basic;
@@ -76,34 +86,63 @@ export function monthWindow(referenceDate = new Date()) {
 }
 
 export function buildAiCallUsage({
+  allowanceMinutes,
+  overageStartsAtMinutes,
+  overageRatePerMinute,
   planName,
   referenceDate = new Date(),
   usedMinutes
 }: {
+  allowanceMinutes?: number | null;
+  overageStartsAtMinutes?: number | null;
+  overageRatePerMinute?: number | null;
   planName?: string | null;
   referenceDate?: Date;
   usedMinutes: number;
 }): AiCallUsage {
   const plan = normalizeAiCallPlan(planName);
+  const selectedAllowance =
+    allowanceMinutes !== null &&
+    allowanceMinutes !== undefined &&
+    Number.isFinite(Number(allowanceMinutes)) &&
+    Number(allowanceMinutes) >= 0
+      ? Number(allowanceMinutes)
+      : plan.allowanceMinutes;
+  const selectedOverageRate =
+    overageRatePerMinute !== null &&
+    overageRatePerMinute !== undefined &&
+    Number.isFinite(Number(overageRatePerMinute)) &&
+    Number(overageRatePerMinute) >= 0
+      ? Number(overageRatePerMinute)
+      : plan.overageRatePerMinute;
+  const selectedOverageThreshold =
+    overageStartsAtMinutes !== null &&
+    overageStartsAtMinutes !== undefined &&
+    Number.isFinite(Number(overageStartsAtMinutes)) &&
+    Number(overageStartsAtMinutes) >= selectedAllowance
+      ? Number(overageStartsAtMinutes)
+      : Math.max(selectedAllowance, plan.overageStartsAtMinutes);
   const safeUsedMinutes = Number.isFinite(usedMinutes) ? Math.max(0, usedMinutes) : 0;
-  const overageMinutes = Math.max(0, safeUsedMinutes - plan.allowanceMinutes);
-  const billableOverageMinutes = plan.overageRatePerMinute ? overageMinutes : 0;
+  const overageMinutes = Math.max(0, safeUsedMinutes - selectedOverageThreshold);
+  const billableOverageMinutes = overageMinutes;
   const { monthLabel, monthStart, nextMonthStart } = monthWindow(referenceDate);
 
   return {
-    allowanceMinutes: plan.allowanceMinutes,
+    allowanceMinutes: selectedAllowance,
     billableOverageMinutes,
-    includedUsedMinutes: Math.min(safeUsedMinutes, plan.allowanceMinutes),
+    graceMinutes: selectedOverageThreshold - selectedAllowance,
+    includedUsedMinutes: Math.min(safeUsedMinutes, selectedAllowance),
     monthLabel,
     monthStart: monthStart.toISOString(),
     nextMonthStart: nextMonthStart.toISOString(),
-    overageAmount: billableOverageMinutes * (plan.overageRatePerMinute ?? 0),
+    overageAmount: billableOverageMinutes * selectedOverageRate,
     overageMinutes,
-    overageRatePerMinute: plan.overageRatePerMinute,
+    overageRatePerMinute: selectedOverageRate,
+    overageStartsAtMinutes: selectedOverageThreshold,
     planKey: plan.key,
     planName: plan.label,
-    remainingMinutes: Math.max(0, plan.allowanceMinutes - safeUsedMinutes),
-    usagePercent: plan.allowanceMinutes > 0 ? Math.min(100, (safeUsedMinutes / plan.allowanceMinutes) * 100) : 0,
+    remainingMinutes: Math.max(0, selectedAllowance - safeUsedMinutes),
+    usagePercent: selectedAllowance > 0 ? Math.min(100, (safeUsedMinutes / selectedAllowance) * 100) : 0,
     usedMinutes: safeUsedMinutes
   };
 }

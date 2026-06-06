@@ -30,24 +30,6 @@ function geocodioApiKey() {
   return process.env.GEOCODIO_API_KEY?.trim().replace(/;+$/, "");
 }
 
-export function distanceMiles(origin: { lat: number; lng: number }, destination: { lat: number; lng: number }) {
-  const earthRadiusMiles = 3958.7613;
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const latDelta = toRadians(destination.lat - origin.lat);
-  const lngDelta = toRadians(destination.lng - origin.lng);
-  const originLat = toRadians(origin.lat);
-  const destinationLat = toRadians(destination.lat);
-  const haversine =
-    Math.sin(latDelta / 2) ** 2 + Math.cos(originLat) * Math.cos(destinationLat) * Math.sin(lngDelta / 2) ** 2;
-
-  return 2 * earthRadiusMiles * Math.asin(Math.min(1, Math.sqrt(haversine)));
-}
-
-export function numericCoordinate(value: unknown) {
-  const coordinate = Number(value);
-  return Number.isFinite(coordinate) ? coordinate : null;
-}
-
 export async function geocodeAddress(address: string): Promise<GeocodeResult> {
   const query = address.trim();
   if (!query) {

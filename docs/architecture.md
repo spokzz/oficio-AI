@@ -49,7 +49,7 @@ Recommended production architecture:
 
 ## Pricing Guardrails
 
-The launch plan is `$149/month + $199 onboarding`.
+Launch plans are Basic (`$79/month`), Premium (`$149/month`), and VIP (`$249/month`), plus `$199` onboarding.
 
 Included usage:
 

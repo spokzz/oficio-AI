@@ -13,7 +13,7 @@ Oficio AI helps Spanish-speaking business owners answer calls and texts in the c
 - `lib` - Supabase clients, server data loaders, types, and formatting helpers
 - `components` - reusable portal, auth, owner, and admin UI
 - `supabase` - schema migration and optional seed SQL
-- `shared` - legacy business-logic fixtures used by `npm test`
+- `shared` - legacy business logic used by `npm test` and the realtime voice gateway
 
 ## Run Locally
 

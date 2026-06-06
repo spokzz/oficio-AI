@@ -7,6 +7,7 @@ import {
   createCallSession,
   findBusinessRoutingContext,
   findKnownCaller,
+  monthlyLimitVoicemailTwiml,
   transferToOwnerTwiml
 } from "@/lib/call-routing";
 import { parseTwilioForm, sayAndHangup, twimlResponse, validateTwilioSignature, xmlEscape } from "@/lib/twilio";
@@ -59,21 +60,31 @@ export async function POST(request: Request) {
   }
 
   const allowanceStatus = await aiCallAllowanceStatus(context.business.id);
+  const minuteLimitPolicy = context.business.minute_limit_policy ?? "continue_overage";
 
-  if (!allowanceStatus.allowed) {
+  if (allowanceStatus.overLimit && minuteLimitPolicy !== "continue_overage") {
+    const forwardToOwner = minuteLimitPolicy === "forward_owner";
     await createCallSession({
       businessId: context.business.id,
       contactType: knownCaller.classification,
       customerId: knownCaller.customerId,
       fromPhone: params.From,
-      outcome: `${allowanceStatus.usage.planName} monthly AI call minute limit reached.`,
+      outcome: forwardToOwner
+        ? `${allowanceStatus.usage.planName} monthly AI minutes used; call forwarded to owner.`
+        : `${allowanceStatus.usage.planName} monthly AI minutes used; caller sent to voicemail.`,
       providerCallId: params.CallSid,
-      screeningResult: "monthly_ai_call_limit_reached",
-      status: "completed",
-      toPhone: params.To
+      screeningResult: forwardToOwner ? "monthly_limit_forward_owner" : "monthly_limit_voicemail",
+      status: forwardToOwner ? "transferred" : "active",
+      toPhone: params.To,
+      transferredToOwner: forwardToOwner
     });
 
-    return twimlResponse(sayAndHangup("Sorry, this business is not accepting AI receptionist calls right now. Please try again later."));
+    if (forwardToOwner) {
+      return twimlResponse(transferToOwnerTwiml(context));
+    }
+
+    const voicemailUrl = new URL("/api/twilio/voice/voicemail", process.env.TWILIO_WEBHOOK_BASE_URL ?? request.url);
+    return twimlResponse(monthlyLimitVoicemailTwiml(voicemailUrl.toString()));
   }
 
   const capacityStatus = await activeAiCallCapacityStatus(context.business.id);

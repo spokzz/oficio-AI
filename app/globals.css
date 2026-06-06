@@ -1377,22 +1377,14 @@ p {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.admin-account-summary div,
-.admin-account-readiness,
-.admin-account-status-grid div,
-.admin-account-meta-grid div,
-.admin-account-address {
+.admin-account-summary div {
   background: #f8f9f6;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
 }
 
-.admin-account-summary span,
-.admin-account-readiness span,
-.admin-account-status-grid span,
-.admin-account-meta-grid span,
-.admin-account-address span {
+.admin-account-summary span {
   color: var(--muted);
   display: block;
   font-size: 12px;
@@ -1401,11 +1393,7 @@ p {
   margin-bottom: 5px;
 }
 
-.admin-account-summary strong,
-.admin-account-readiness strong,
-.admin-account-status-grid strong,
-.admin-account-meta-grid strong,
-.admin-account-address strong {
+.admin-account-summary strong {
   color: var(--text);
   display: block;
   font-size: 14px;
@@ -1415,83 +1403,6 @@ p {
 
 .admin-account-summary strong {
   font-size: 22px;
-}
-
-.admin-account-list {
-  display: grid;
-  gap: 14px;
-}
-
-.admin-account-card {
-  background: var(--white);
-  border: 1px solid rgba(230, 235, 230, 0.86);
-  border-radius: 8px;
-  box-shadow: var(--soft-shadow);
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
-  padding: 18px;
-}
-
-.admin-account-main,
-.admin-account-side {
-  align-content: start;
-  display: grid;
-  gap: 14px;
-}
-
-.admin-account-title-row {
-  align-items: start;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.admin-account-title-row .inline-edit-form {
-  max-width: 520px;
-}
-
-.admin-account-meta-grid,
-.admin-account-status-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.admin-account-address strong {
-  overflow-wrap: anywhere;
-}
-
-.readiness-checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.readiness-checks span {
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 11px;
-  margin: 0;
-  padding: 6px 8px;
-}
-
-.readiness-checks .ready {
-  background: #e5f6ea;
-  color: #167341;
-}
-
-.readiness-checks .missing {
-  background: #fff3e4;
-  color: var(--orange-700);
-}
-
-.admin-account-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
 }
 
 .admin-account-modal {
@@ -1545,17 +1456,6 @@ p {
 .button.compact {
   min-height: 34px;
   padding: 7px 10px;
-}
-
-.button.danger-text {
-  color: #b84a3a;
-}
-
-.button.danger-text:hover,
-.button.danger-text:focus-visible {
-  background: #f9e3dd;
-  border-color: rgba(184, 74, 58, 0.22);
-  color: #8f3329;
 }
 
 .phone-guidance-card {
@@ -2522,28 +2422,6 @@ p {
   margin: 0;
 }
 
-.round-control {
-  align-items: center;
-  border: 0;
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 18px;
-  font-weight: 900;
-  height: 48px;
-  justify-content: center;
-  width: 48px;
-}
-
-.round-control.pause {
-  background: var(--white);
-  color: var(--green-950);
-}
-
-.round-control.stop {
-  background: #e94242;
-  color: var(--white);
-}
-
 .form-grid {
   display: grid;
   gap: 14px;
@@ -3278,9 +3156,6 @@ p {
   .form-grid,
   .admin-accounts-intro,
   .admin-account-summary,
-  .admin-account-card,
-  .admin-account-meta-grid,
-  .admin-account-status-grid,
   .admin-services-grid,
   .service-area-row,
   .availability-closure-form,

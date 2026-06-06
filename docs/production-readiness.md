@@ -6,7 +6,7 @@ This project is a working local prototype. To make it production ready, replace 
 
 - Keep the first paid product focused on U.S. home-service owners.
 - Launch with landscaping first, but keep the data model trade-flexible.
-- Keep v1 billing manual: `$149/month + $199 onboarding`.
+- Keep v1 billing manual with Basic, Premium, and VIP plan defaults plus `$199` onboarding.
 - Keep quotes owner-approval-first. Do not allow automatic final quotes yet.
 - Define the first supported customer languages: English, Spanish, Hindi, Punjabi, Urdu, Gujarati, Arabic, Mandarin, and Vietnamese.
 
@@ -156,4 +156,3 @@ This project is a working local prototype. To make it production ready, replace 
   - owner response time
   - AI failure rate
   - gross margin per account
-

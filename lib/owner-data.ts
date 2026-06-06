@@ -256,6 +256,9 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
   const calls = (callsResult.data ?? []) as CallSession[];
   const billing = billingResult.data ?? null;
   const aiCallUsage = buildAiCallUsage({
+    allowanceMinutes: billing?.included_minutes,
+    overageStartsAtMinutes: billing?.overage_starts_at_minutes,
+    overageRatePerMinute: billing?.overage_rate_per_minute,
     planName: billing?.plan_name,
     referenceDate: requestTime,
     usedMinutes: sumUsageMinutes((usageResult.data ?? []) as Array<{ quantity: number | string | null }>)

@@ -14,6 +14,11 @@ export type AdminAccount = Business & {
 export type AdminPortalData = {
   user: UserProfile;
   accounts: AdminAccount[];
+  twilioCredentials: {
+    accountSidConfigured: boolean;
+    authTokenConfigured: boolean;
+    ready: boolean;
+  };
   totals: {
     businesses: number;
     live: number;
@@ -21,6 +26,11 @@ export type AdminPortalData = {
     monthlyRevenue: number;
   };
 };
+
+function configuredEnvironmentValue(name: string) {
+  const value = process.env[name]?.trim();
+  return Boolean(value && !value.startsWith("your-") && !value.startsWith("replace-with-"));
+}
 
 export async function getAdminPortalData(): Promise<AdminPortalData> {
   const supabase = await createClient();
@@ -102,6 +112,9 @@ export async function getAdminPortalData(): Promise<AdminPortalData> {
   const typedAccounts: AdminAccount[] = baseAccounts.map((account) => ({
     ...account,
     aiCallUsage: buildAiCallUsage({
+      allowanceMinutes: account.manual_billing_accounts?.[0]?.included_minutes,
+      overageStartsAtMinutes: account.manual_billing_accounts?.[0]?.overage_starts_at_minutes,
+      overageRatePerMinute: account.manual_billing_accounts?.[0]?.overage_rate_per_minute,
       planName: account.manual_billing_accounts?.[0]?.plan_name,
       usedMinutes: usageByBusiness.get(account.id) ?? 0
     }),
@@ -116,10 +129,17 @@ export async function getAdminPortalData(): Promise<AdminPortalData> {
       0
     )
   };
+  const accountSidConfigured = configuredEnvironmentValue("TWILIO_ACCOUNT_SID");
+  const authTokenConfigured = configuredEnvironmentValue("TWILIO_AUTH_TOKEN");
 
   return {
     user: profile,
     accounts: typedAccounts,
+    twilioCredentials: {
+      accountSidConfigured,
+      authTokenConfigured,
+      ready: accountSidConfigured && authTokenConfigured
+    },
     totals
   };
 }

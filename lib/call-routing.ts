@@ -2,15 +2,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { buildAiCallUsage, monthWindow, normalizeAiCallPlan, sumUsageMinutes } from "@/lib/call-usage";
 import { normalizePhone, phoneSearchValues } from "@/lib/phone";
 import { xmlEscape } from "@/lib/twilio";
+import type { MinuteLimitPolicy } from "@/lib/types";
 
 export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
 
 export type RoutingBusiness = {
+  booking_time_zone?: string | null;
   id: string;
   name: string;
   trade: string;
   phone: string | null;
   messaging_service_sid: string | null;
+  minute_limit_policy: MinuteLimitPolicy;
   twilio_routing_phone: string | null;
   owner_transfer_phone: string | null;
   owner_summary_language?: string | null;
@@ -50,7 +53,7 @@ export function aiConcurrentCallLimit(planName?: string | null) {
   return DEFAULT_MAX_ACTIVE_AI_CALLS[normalizeAiCallPlan(planName).key];
 }
 
-export async function expireStaleActiveAiCalls(businessId: string) {
+async function expireStaleActiveAiCalls(businessId: string) {
   const cutoff = new Date(Date.now() - MAX_REALTIME_CALL_DURATION_MS).toISOString();
   const supabase = createAdminClient();
 
@@ -108,7 +111,16 @@ export async function aiCallAllowanceStatus(businessId: string) {
   const supabase = createAdminClient();
   const usageWindow = monthWindow();
   const [{ data: billing }, { data: usageEvents }] = await Promise.all([
-    supabase.from("manual_billing_accounts").select("plan_name").eq("business_id", businessId).maybeSingle<{ plan_name: string | null }>(),
+    supabase
+      .from("manual_billing_accounts")
+      .select("plan_name,included_minutes,overage_starts_at_minutes,overage_rate_per_minute")
+      .eq("business_id", businessId)
+      .maybeSingle<{
+        included_minutes: number | null;
+        overage_rate_per_minute: number | null;
+        overage_starts_at_minutes: number | null;
+        plan_name: string | null;
+      }>(),
     supabase
       .from("usage_events")
       .select("quantity")
@@ -119,12 +131,15 @@ export async function aiCallAllowanceStatus(businessId: string) {
       .lt("occurred_at", usageWindow.nextMonthStart.toISOString())
   ]);
   const usage = buildAiCallUsage({
+    allowanceMinutes: billing?.included_minutes,
+    overageStartsAtMinutes: billing?.overage_starts_at_minutes,
+    overageRatePerMinute: billing?.overage_rate_per_minute,
     planName: billing?.plan_name,
     usedMinutes: sumUsageMinutes((usageEvents ?? []) as Array<{ quantity: number | string | null }>)
   });
 
   return {
-    allowed: usage.planKey === "vip" || usage.usedMinutes < usage.allowanceMinutes,
+    overLimit: usage.usedMinutes >= usage.overageStartsAtMinutes,
     usage
   };
 }
@@ -137,7 +152,7 @@ export async function findBusinessRoutingContext(toPhone: string | null | undefi
 
   const { data: routingBusiness, error: routingBusinessError } = await supabase
     .from("businesses")
-    .select("id,name,trade,phone,messaging_service_sid,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
+    .select("id,name,trade,phone,messaging_service_sid,minute_limit_policy,twilio_routing_phone,owner_transfer_phone,owner_summary_language,booking_time_zone,ai_voice_name,ai_disclosure")
     .in("twilio_routing_phone", phones)
     .limit(1)
     .maybeSingle<RoutingBusiness>();
@@ -147,7 +162,7 @@ export async function findBusinessRoutingContext(toPhone: string | null | undefi
     ? { data: null, error: null }
     : await supabase
         .from("businesses")
-        .select("id,name,trade,phone,messaging_service_sid,twilio_routing_phone,owner_transfer_phone,owner_summary_language,ai_voice_name,ai_disclosure")
+        .select("id,name,trade,phone,messaging_service_sid,minute_limit_policy,twilio_routing_phone,owner_transfer_phone,owner_summary_language,booking_time_zone,ai_voice_name,ai_disclosure")
         .in("phone", phones)
         .limit(1)
         .maybeSingle<RoutingBusiness>();
@@ -406,10 +421,6 @@ export async function enqueueOwnerContactConfirmation({
   }
 }
 
-export function ownerFirstName(owner: RoutingOwner | null) {
-  return owner?.full_name?.trim().split(/\s+/)[0] || "the owner's";
-}
-
 export function businessScreeningPrompt(context: RoutingContext) {
   const agentName = context.business.ai_voice_name?.replace(/\s+/g, " ").trim() || "Ana";
   return `Hi, thanks for calling ${context.business.name}. This is ${agentName}. How can I help today?`;
@@ -423,6 +434,17 @@ export function transferToOwnerTwiml(context: RoutingContext) {
   const callerId = context.business.twilio_routing_phone ?? context.business.phone ?? undefined;
   const callerIdAttribute = callerId ? ` callerId="${xmlEscape(callerId)}"` : "";
   return `<Response><Dial${callerIdAttribute}>${xmlEscape(context.ownerPhone)}</Dial></Response>`;
+}
+
+export function monthlyLimitVoicemailTwiml(actionUrl: string) {
+  return [
+    "<Response>",
+    '<Say voice="Polly.Joanna" language="en-US">Thanks for calling. Please leave your name, number, and reason for calling, and the owner will follow up.</Say>',
+    `<Record action="${xmlEscape(actionUrl)}" method="POST" maxLength="120" playBeep="true" trim="trim-silence" />`,
+    '<Say voice="Polly.Joanna" language="en-US">We did not receive a message. Please call again later.</Say>',
+    "<Hangup />",
+    "</Response>"
+  ].join("");
 }
 
 export function businessFlowTwiml({

@@ -22,10 +22,8 @@ Fastest path:
 
 1. Open Supabase Dashboard.
 2. Go to SQL Editor.
-3. Open `supabase/migrations/001_initial_schema.sql`.
-4. Copy the full SQL.
-5. Paste into SQL Editor.
-6. Click Run.
+3. Run every file in `supabase/migrations` in numeric order, from `001_initial_schema.sql` through the latest migration.
+4. For an existing project, run only migrations that have not already been applied.
 
 This creates:
 
@@ -41,6 +39,9 @@ This creates:
 - `ai_summaries`
 - `usage_events`
 - `manual_billing_accounts`
+- `owner_sms_pending_actions`
+- `owner_sms_history`
+- `owner_daily_agenda_deliveries`
 - Row Level Security policies
 - indexes
 - auth user profile trigger

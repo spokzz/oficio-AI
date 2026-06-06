@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { estimateLandscapingQuote, estimateMonthlyGrossMargin, isInsideServiceRadius } from "../shared/domain.js";
-import { pricingPlan } from "../shared/data.js";
 import { createActiveVoiceCallRegistry } from "../shared/active-voice-call-registry.js";
 
 const chicago = { lat: 41.8529, lng: -87.6532 };
@@ -23,7 +22,7 @@ const quote = estimateLandscapingQuote({
 assert.deepEqual(quote, { low: 280, high: 360, recommended: 320 });
 
 const margin = estimateMonthlyGrossMargin({
-  monthlyPrice: pricingPlan.monthlyPrice,
+  monthlyPrice: 149,
   voiceMinutes: 200,
   smsSegments: 500
 });
@@ -45,6 +44,16 @@ const browserRenderedSource = sourceFiles(new URL("../app/", import.meta.url))
   .concat(sourceFiles(new URL("../components/", import.meta.url)))
   .map((fileUrl) => fs.readFileSync(fileUrl, "utf8"))
   .join("\n");
+const adminDashboardSource = fs.readFileSync(new URL("../components/admin/admin-dashboard.tsx", import.meta.url), "utf8");
+const accountHealthSource = adminDashboardSource.slice(
+  adminDashboardSource.indexOf("function AccountTable"),
+  adminDashboardSource.indexOf("function accountLaunchChecks")
+);
+const addressLookupSource = fs.readFileSync(new URL("../components/ui/address-lookup-input.tsx", import.meta.url), "utf8");
+const adminDataSource = fs.readFileSync(new URL("../lib/admin-data.ts", import.meta.url), "utf8");
+const callRoutingSource = fs.readFileSync(new URL("../lib/call-routing.ts", import.meta.url), "utf8");
+const callUsageSource = fs.readFileSync(new URL("../lib/call-usage.ts", import.meta.url), "utf8");
+const loginCardSource = fs.readFileSync(new URL("../components/auth/login-card.tsx", import.meta.url), "utf8");
 const dashboardRenderedSource = sourceFiles(new URL("../components/", import.meta.url))
   .concat([
     new URL("../app/admin/page.tsx", import.meta.url),
@@ -105,8 +114,7 @@ for (const action of [
   "deleteOwnerBooking",
   "addOwnerCustomer",
   "updateOwnerCustomer",
-  "deleteOwnerCustomer",
-  "markOwnerRecentCall"
+  "deleteOwnerCustomer"
 ]) {
   assert.equal(
     new RegExp(`function ${action}[\\s\\S]{0,260}validate(Form|CurrentUser)CsrfToken`).test(ownerActionsSource),
@@ -117,7 +125,6 @@ for (const action of [
 for (const action of [
   "onboardOwner",
   "updateBusinessPhoneSetup",
-  "updateAdminBusinessName",
   "updateAdminOwnerName",
   "updateAdminAccount",
   "deleteAdminAccount",
@@ -131,6 +138,123 @@ for (const action of [
   );
 }
 assert.equal(browserRenderedSource.includes('name={CSRF_FIELD_NAME}'), true, "Owner/admin forms should render CSRF token fields");
+assert.equal(
+  adminDashboardSource.includes('value={formValues.businessName}') &&
+    adminDashboardSource.includes('value={formValues.ownerPassword}') &&
+    adminDashboardSource.includes('value={formValues.phoneSetupNotes}'),
+  true,
+  "New owner setup should keep all entered values in controlled client state after an action error"
+);
+assert.equal(
+  addressLookupSource.includes("value: controlledValue") && addressLookupSource.includes("onValueChange?.(nextValue)"),
+  true,
+  "Address lookup should support controlled onboarding values"
+);
+assert.equal(
+  adminDataSource.includes("accountSidConfigured") &&
+    adminDataSource.includes("authTokenConfigured") &&
+    !adminDataSource.includes('accountSid: process.env["TWILIO_ACCOUNT_SID"]') &&
+    !adminDataSource.includes('authToken: process.env["TWILIO_AUTH_TOKEN"]'),
+  true,
+  "Admin data should expose Twilio credential status without exposing credential values"
+);
+assert.equal(
+  adminDashboardSource.includes("Twilio platform credentials") &&
+    adminDashboardSource.includes("Keep the Auth Token in server environment variables"),
+  true,
+  "New owner setup should explain that Twilio credentials are platform-level secrets"
+);
+for (const planDefault of [
+  'label: "Basic"',
+  "monthlyPrice: 79",
+  "allowanceMinutes: 100",
+  "overageStartsAtMinutes: 110",
+  "overageRatePerMinute: 0.49",
+  "monthlyPrice: 149",
+  "allowanceMinutes: 300",
+  "overageStartsAtMinutes: 320",
+  "overageRatePerMinute: 0.39",
+  "monthlyPrice: 249",
+  "allowanceMinutes: 750",
+  "overageStartsAtMinutes: 800",
+  "overageRatePerMinute: 0.29"
+]) {
+  assert.equal(callUsageSource.includes(planDefault), true, `AI call plans should include ${planDefault}`);
+}
+assert.equal(
+  callUsageSource.includes("safeUsedMinutes - selectedOverageThreshold"),
+  true,
+  "Billable overage minutes should begin after the configured grace threshold"
+);
+assert.equal(
+  callRoutingSource.includes("usage.usedMinutes >= usage.overageStartsAtMinutes"),
+  true,
+  "Monthly minute-limit routing should begin at the overage threshold"
+);
+assert.equal(
+  adminDashboardSource.includes('name="includedMinutes"') &&
+    adminDashboardSource.includes('name="overageStartsAtMinutes"') &&
+    adminDashboardSource.includes('name="overageRatePerMinute"') &&
+    adminDashboardSource.includes("handlePlanSelect"),
+  true,
+  "Admin onboarding should preload editable included minutes and overage pricing from the selected plan"
+);
+assert.equal(
+  adminActionsSource.includes("included_minutes: includedMinutes") &&
+    adminActionsSource.includes("overage_starts_at_minutes: overageStartsAtMinutes") &&
+    adminActionsSource.includes("overage_rate_per_minute: overageRatePerMinute"),
+  true,
+  "Admin actions should persist customized per-account call plan terms"
+);
+assert.equal(
+  adminDashboardSource.includes("Continue calls and bill overage") &&
+    adminDashboardSource.includes("Stop AI calls and take basic voicemail") &&
+    adminDashboardSource.includes("Forward calls to owner"),
+  true,
+  "Admin should configure all monthly minute-limit behaviors"
+);
+assert.equal(
+  ownerActionsSource.includes("minute_limit_policy: minuteLimitPolicy") &&
+    browserRenderedSource.includes('name="minuteLimitPolicy"'),
+  true,
+  "Owners should be able to save their monthly minute-limit behavior"
+);
+assert.equal(
+  adminDashboardSource.includes('name="onboardingFee"') &&
+    adminDashboardSource.includes("Automatically set to one calendar month after account creation."),
+  true,
+  "Admin onboarding should allow an editable setup fee and explain the automatic first payment date"
+);
+assert.equal(
+  adminActionsSource.includes("nextMonthlyPaymentDueDate()") &&
+    adminActionsSource.includes("next_payment_due_at: nextMonthlyPaymentDueDate()"),
+  true,
+  "New accounts should receive a next payment date one calendar month after creation"
+);
+assert.equal(
+  !accountHealthSource.includes("<th>Billing</th>") &&
+    !accountHealthSource.includes("<th>Action</th>") &&
+    !accountHealthSource.includes("<th>Phone setup</th>") &&
+    accountHealthSource.includes("<th>Next payment</th>") &&
+    accountHealthSource.includes("billing?.next_payment_due_at") &&
+    !accountHealthSource.includes("<BusinessNameEditor") &&
+    !accountHealthSource.includes("<OwnerList"),
+  true,
+  "Account Health should render read-only identity and next payment without billing, phone setup, or action columns"
+);
+assert.equal(
+  adminDashboardSource.includes('label="MRR"') &&
+    adminDashboardSource.includes('foot="Monthly revenue"') &&
+    adminDataSource.includes("sum + Number(account.manual_billing_accounts?.[0]?.monthly_price ?? 0)"),
+  true,
+  "Dashboard monthly revenue should total each account's current monthly plan price"
+);
+assert.equal(
+  loginCardSource.includes("Run your business from one") &&
+    loginCardSource.includes("Ana answers calls, books jobs, and sends every job summary in Spanish or English."),
+  true,
+  "Admin login should use the same Ana dashboard message as the owner login"
+);
 
 const twilioSource = fs.readFileSync(new URL("../lib/twilio.ts", import.meta.url), "utf8");
 assert.equal(twilioSource.includes("if (!authToken) return true"), false, "Twilio webhook validation must not allow requests when TWILIO_AUTH_TOKEN is missing");
@@ -145,7 +269,8 @@ for (const route of [
   "../app/api/twilio/voice/route.ts",
   "../app/api/twilio/sms/route.ts",
   "../app/api/twilio/voice/status/route.ts",
-  "../app/api/twilio/voice/screen/route.ts"
+  "../app/api/twilio/voice/screen/route.ts",
+  "../app/api/twilio/voice/voicemail/route.ts"
 ]) {
   const routeSource = fs.readFileSync(new URL(route, import.meta.url), "utf8");
   assert.equal(routeSource.includes("validateTwilioSignature"), true, `${route} should validate X-Twilio-Signature`);
@@ -154,11 +279,23 @@ for (const route of [
 
 const twilioVoiceRouteSource = fs.readFileSync(new URL("../app/api/twilio/voice/route.ts", import.meta.url), "utf8");
 assert.equal(twilioVoiceRouteSource.includes("activeAiCallCapacityStatus"), true, "Voice webhooks should enforce per-business active AI call limits");
+assert.equal(
+  twilioVoiceRouteSource.includes('minuteLimitPolicy !== "continue_overage"') &&
+    twilioVoiceRouteSource.includes("monthlyLimitVoicemailTwiml") &&
+    twilioVoiceRouteSource.includes("transferToOwnerTwiml"),
+  true,
+  "Voice routing should enforce the configured over-limit behavior before starting Ana"
+);
+const twilioVoiceStatusSource = fs.readFileSync(new URL("../app/api/twilio/voice/status/route.ts", import.meta.url), "utf8");
+assert.equal(
+  twilioVoiceStatusSource.includes('!call.screening_result?.startsWith("monthly_limit_")'),
+  true,
+  "Voicemail and owner-forward calls should not be billed as AI receptionist minutes"
+);
 
 const phoneSource = fs.readFileSync(new URL("../lib/phone.ts", import.meta.url), "utf8");
 assert.equal(phoneSource.includes("phone?.trim()"), false, "Phone search values should not include unsanitized raw input in query builders");
 
-const callRoutingSource = fs.readFileSync(new URL("../lib/call-routing.ts", import.meta.url), "utf8");
 assert.equal(callRoutingSource.includes(".or(filters)"), false, "Call routing should not build raw PostgREST OR filter strings from phone input");
 assert.equal(callRoutingSource.includes('.in("twilio_routing_phone", phones)'), true, "Call routing should use fixed-column phone lookups");
 assert.equal(callRoutingSource.includes("messaging_service_sid"), true, "Call routing should load per-business Messaging Service SID for outbound SMS");
@@ -166,6 +303,50 @@ assert.equal(callRoutingSource.includes("messaging_service_sid"), true, "Call ro
 const twilioSmsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
 assert.equal(twilioSmsRouteSource.includes("reserveTwilioWebhookEvent(params.MessageSid"), true, "SMS webhooks should dedupe Twilio MessageSid before side effects");
 assert.equal(twilioSmsRouteSource.includes("businessSmsSender"), true, "SMS webhooks should send outbound replies from the configured business sender");
+assert.equal(
+  twilioSmsRouteSource.includes("findAuthorizedSmsOwner") &&
+    twilioSmsRouteSource.includes("handleOwnerAssistantSms") &&
+    twilioSmsRouteSource.includes("owner_sms_access_denied"),
+  true,
+  "SMS webhooks should authorize and audit owner-assistant access before exposing business data"
+);
+
+const ownerSmsAssistantSource = fs.readFileSync(new URL("../lib/owner-sms-assistant.ts", import.meta.url), "utf8");
+assert.equal(ownerSmsAssistantSource.includes('.eq("role", "owner")'), true, "Owner SMS authorization should require an owner membership and owner profile");
+assert.equal(ownerSmsAssistantSource.includes("normalizePhone(profile.phone) === phone"), true, "Owner SMS authorization should exactly match the saved normalized owner phone");
+assert.equal(ownerSmsAssistantSource.includes("business_id") && ownerSmsAssistantSource.includes(".eq(\"business_id\", businessId)"), true, "Owner SMS data access should remain business-scoped");
+assert.equal(ownerSmsAssistantSource.includes("https://api.openai.com/v1/responses"), true, "Owner SMS intent extraction should use the OpenAI Responses API");
+assert.equal(ownerSmsAssistantSource.includes('type: "json_schema"') && ownerSmsAssistantSource.includes("strict: true"), true, "Owner SMS intent extraction should use strict structured output");
+assert.equal(ownerSmsAssistantSource.includes("owner_sms_pending_actions"), true, "Owner SMS changes should use expiring pending confirmations");
+assert.equal(ownerSmsAssistantSource.includes("owner_sms_history"), true, "Owner SMS commands and replies should use separate owner history");
+assert.equal(ownerSmsAssistantSource.includes("WhatsApp"), false, "Owner assistant implementation should remain SMS-only");
+for (const protectedAction of ["update_customer", "delete_customer", "delete_lead", "delete_booking", "send_customer_message_after_confirmation"]) {
+  assert.equal(ownerSmsAssistantSource.includes(protectedAction), true, `Owner SMS should support protected action ${protectedAction}`);
+}
+
+const dailyOwnerAgendaSource = fs.readFileSync(new URL("../lib/daily-owner-agenda.ts", import.meta.url), "utf8");
+const customerReminderCronSource = fs.readFileSync(new URL("../app/api/customer-reminders/due/route.ts", import.meta.url), "utf8");
+const vercelSource = fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8");
+assert.equal(customerReminderCronSource.includes("sendDueOwnerDailyAgendas"), true, "Reminder cron should send the owner daily agenda after generating reminders");
+assert.equal(vercelSource.includes('"schedule": "0 10 * * *"'), true, "Hobby deployment should use a supported once-daily UTC agenda schedule");
+assert.equal(dailyOwnerAgendaSource.includes("OWNER_DAILY_AGENDA_HOUR ?? 5"), true, "Daily agenda should default to 5 AM local business time");
+assert.equal(dailyOwnerAgendaSource.includes('OWNER_DAILY_AGENDA_DISPATCH_MODE ?? "daily"'), true, "Daily agenda should default to Hobby-compatible daily dispatch");
+assert.equal(dailyOwnerAgendaSource.includes("booking_time_zone"), true, "Daily agenda should use each business booking timezone");
+assert.equal(dailyOwnerAgendaSource.includes('.eq("role", "owner")'), true, "Daily agenda should only load owner memberships");
+assert.equal(dailyOwnerAgendaSource.includes("normalizePhone(owner.phone)"), true, "Daily agenda should send only to saved owner profile phones");
+assert.equal(dailyOwnerAgendaSource.includes("owner_summary_language"), true, "Daily agenda should use the saved owner summary language");
+assert.equal(dailyOwnerAgendaSource.includes("owner_daily_agenda_deliveries"), true, "Daily agenda delivery should be durably deduplicated");
+assert.equal(
+  dailyOwnerAgendaSource.includes("Good morning — here’s your schedule for today") &&
+    dailyOwnerAgendaSource.includes("Buenos días — este es tu horario para hoy") &&
+    dailyOwnerAgendaSource.includes("Good morning — no jobs are scheduled for today"),
+  true,
+  "Daily agenda should have normal and no-job English/Spanish templates"
+);
+assert.equal(dailyOwnerAgendaSource.includes("Showing first 5:") && dailyOwnerAgendaSource.includes("more jobs in dashboard"), true, "Daily agenda should cap job details at five");
+assert.equal(dailyOwnerAgendaSource.includes("OWNER_DASHBOARD_URL"), true, "Daily agenda should always include the environment-specific owner dashboard link");
+assert.equal(dailyOwnerAgendaSource.includes("leadWindowStart") && dailyOwnerAgendaSource.includes("leadWindowEnd"), true, "New leads should use the previous local agenda window");
+assert.equal(dailyOwnerAgendaSource.includes("missingAddressNames") && dailyOwnerAgendaSource.includes("pendingApprovalCount"), true, "Daily agenda should summarize actionable attention items");
 
 const realtimeGatewaySource = fs.readFileSync(new URL("../scripts/voice-realtime-server.mjs", import.meta.url), "utf8");
 assert.equal(realtimeGatewaySource.includes("IDLE_NO_AUDIO_TIMEOUT_MS = Number(process.env.OFICIO_IDLE_NO_AUDIO_TIMEOUT_MS || 15 * 1000)"), true, "Realtime gateway should default no-audio timeout to 15 seconds");
@@ -181,6 +362,21 @@ assert.equal(realtimeGatewaySource.includes("assertProviderEnvironmentSafety"), 
 assert.equal(realtimeGatewaySource.includes("assertNoProtectedSecrets(instructions"), true, "Realtime gateway should check Ana instructions for protected secrets");
 assert.equal(realtimeGatewaySource.includes("businessSmsSender"), true, "Realtime gateway SMS should prefer per-business Twilio sender configuration");
 assert.equal(realtimeGatewaySource.includes("messaging_service_sid"), true, "Realtime gateway should load per-business Messaging Service SID");
+assert.equal(
+  realtimeGatewaySource.includes("property_access_confirmed") &&
+    realtimeGatewaySource.includes("property_access_notes") &&
+    realtimeGatewaySource.includes("After the basic service, address, and scheduling details are collected") &&
+    realtimeGatewaySource.includes("ai_notes: jobAiNotes"),
+  true,
+  "Ana should ask the late-stage property-access question and save the answer in owner-visible job notes"
+);
+assert.equal(
+  realtimeGatewaySource.includes("pets, a gate or gate code, parking, unit or building instructions") &&
+    realtimeGatewaySource.includes("Property access:") &&
+    realtimeGatewaySource.includes("Access:"),
+  true,
+  "Owner summaries and approval messages should surface property access details"
+);
 
 const smsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
 assert.equal(smsRouteSource.includes("validCustomerConfirmationSms"), true, "Customer confirmation SMS should be template-validated before sending");
@@ -192,6 +388,19 @@ const migrationSql = fs
   .sort()
   .map((file) => fs.readFileSync(new URL(file, migrationsDirectory), "utf8"))
   .join("\n");
+assert.equal(migrationSql.includes("included_minutes integer"), true, "Billing migrations should store per-account included minutes");
+assert.equal(migrationSql.includes("overage_starts_at_minutes integer"), true, "Billing migrations should store each account's overage threshold");
+assert.equal(migrationSql.includes("overage_rate_per_minute numeric"), true, "Billing migrations should store per-account overage pricing");
+assert.equal(migrationSql.includes("minute_limit_policy text"), true, "Businesses should store a monthly minute-limit behavior");
+assert.equal(migrationSql.includes("voicemail_recording_url text"), true, "Call sessions should store voicemail recording metadata");
+assert.equal(migrationSql.includes("create table if not exists public.owner_sms_pending_actions"), true, "Owner SMS confirmations should have durable expiring state");
+assert.equal(migrationSql.includes("create table if not exists public.owner_sms_history"), true, "Owner SMS history should be stored separately from customer messages");
+assert.equal(migrationSql.includes("owner_sms_pending_actions_one_pending_idx"), true, "Each owner should have at most one active owner SMS action");
+assert.equal(migrationSql.includes('create policy "members manage owner sms pending actions"'), false, "Authenticated browser clients should not mutate owner SMS confirmations");
+assert.equal(migrationSql.includes('create policy "members create owner sms history"'), false, "Authenticated browser clients should not forge owner SMS history");
+assert.equal(migrationSql.includes("create table if not exists public.owner_daily_agenda_deliveries"), true, "Daily owner agendas should have a delivery ledger");
+assert.equal(migrationSql.includes("unique (business_id, owner_user_id, agenda_date)"), true, "Daily owner agenda delivery should be unique per owner and local date");
+assert.equal(migrationSql.includes('create policy "members manage owner daily agenda deliveries"'), false, "Authenticated browser clients should not forge daily agenda deliveries");
 for (const table of [
   "businesses",
   "business_users",

@@ -87,8 +87,13 @@ const copy = {
     usedMinutes: "Minutos usados",
     remainingMinutes: "Minutos restantes",
     includedMinutes: "Minutos incluidos",
-    vipOverage: "Exceso VIP",
+    overageStartsAfter: "El exceso comienza después de",
+    extraMinutes: "Minutos extra",
+    overageCharge: "Cargo por exceso",
+    vipOverage: "Exceso",
     noOverageBilling: "Sin cobro por exceso",
+    voicemail: "Buzón de voz",
+    playVoicemail: "Reproducir mensaje",
     today: "Hoy",
     currentData: "Datos actuales",
     aiOutcomes: "Resultados AI",
@@ -168,6 +173,13 @@ const copy = {
     phoneSetupSubtitle: "Cómo Ana recibe llamadas y mensajes para este negocio.",
     ownerSummarySettings: "Resúmenes para el dueño",
     ownerSummarySettingsSubtitle: "Elige cómo Ana agenda trabajos, explica horarios y envía resúmenes.",
+    minuteLimitBehavior: "Cuando se usen los minutos mensuales",
+    continueOverage: "Continuar llamadas y cobrar exceso",
+    continueOverageDescription: "Ana sigue contestando y los minutos extra se cobran según tu tarifa.",
+    takeVoicemail: "Detener llamadas AI y tomar buzón de voz básico",
+    takeVoicemailDescription: "La persona deja su nombre, número y motivo de la llamada.",
+    forwardAtLimit: "Reenviar llamadas al dueño",
+    forwardAtLimitDescription: "Las llamadas nuevas van al teléfono privado configurado.",
     availabilitySettings: "Días cerrados",
     availabilitySettingsSubtitle: "Bloquea vacaciones, días festivos o cierres para que Ana no ofrezca citas.",
     closureReason: "Motivo",
@@ -359,8 +371,13 @@ const copy = {
     usedMinutes: "Used minutes",
     remainingMinutes: "Remaining minutes",
     includedMinutes: "Included minutes",
-    vipOverage: "VIP overage",
+    overageStartsAfter: "Overage starts after",
+    extraMinutes: "Extra minutes",
+    overageCharge: "Overage charge",
+    vipOverage: "Overage",
     noOverageBilling: "No overage billing",
+    voicemail: "Voicemail",
+    playVoicemail: "Play voicemail",
     today: "Today",
     currentData: "Current data",
     aiOutcomes: "AI outcomes",
@@ -440,6 +457,13 @@ const copy = {
     phoneSetupSubtitle: "How Ana receives calls and texts for this business.",
     ownerSummarySettings: "Owner summaries",
     ownerSummarySettingsSubtitle: "Choose how Ana schedules jobs, explains hours, and sends owner summaries.",
+    minuteLimitBehavior: "When monthly minutes are used",
+    continueOverage: "Continue calls and bill overage",
+    continueOverageDescription: "Ana keeps answering and extra minutes are billed at your configured rate.",
+    takeVoicemail: "Stop AI calls and take basic voicemail",
+    takeVoicemailDescription: "Callers leave their name, number, and reason for calling.",
+    forwardAtLimit: "Forward calls to owner",
+    forwardAtLimitDescription: "New calls go to the configured private owner phone.",
     availabilitySettings: "Closed dates",
     availabilitySettingsSubtitle: "Block vacations, holidays, or closures so Ana does not offer appointments.",
     closureReason: "Reason",
@@ -1525,9 +1549,8 @@ function CustomerReminderList({ data, labels }: { data: OwnerPortalData; labels:
 
 function AiCallMinutesCard({ data, labels }: { data: OwnerPortalData; labels: OwnerCopy }) {
   const usage = data.aiCallUsage;
-  const overageText = usage.overageRatePerMinute
-    ? `${formatMinutes(usage.billableOverageMinutes)} min · ${formatCurrency(usage.overageAmount)}`
-    : labels.noOverageBilling;
+  const overageRateText =
+    usage.overageRatePerMinute !== null ? `${formatCurrency(usage.overageRatePerMinute)}/min` : labels.noOverageBilling;
 
   return (
     <section className="card call-minutes-card">
@@ -1545,7 +1568,8 @@ function AiCallMinutesCard({ data, labels }: { data: OwnerPortalData; labels: Ow
         <article className="row-card">
           <strong>{labels.plan}</strong>
           <div className="meta">
-            {usage.planName} · {formatMinutes(usage.allowanceMinutes)} {labels.includedMinutes.toLowerCase()}
+            {usage.planName} · {formatMinutes(usage.allowanceMinutes)} {labels.includedMinutes.toLowerCase()} · {labels.overageStartsAfter.toLowerCase()}{" "}
+            {formatMinutes(usage.overageStartsAtMinutes)} min
           </div>
         </article>
         <article className="row-card">
@@ -1557,8 +1581,12 @@ function AiCallMinutesCard({ data, labels }: { data: OwnerPortalData; labels: Ow
           <div className="meta">{formatMinutes(usage.remainingMinutes)} min</div>
         </article>
         <article className="row-card">
-          <strong>{labels.vipOverage}</strong>
-          <div className="meta">{overageText}</div>
+          <strong>{labels.extraMinutes}</strong>
+          <div className="meta">{formatMinutes(usage.overageMinutes)} min</div>
+        </article>
+        <article className="row-card">
+          <strong>{labels.overageCharge}</strong>
+          <div className="meta">{formatCurrency(usage.overageAmount)} · {overageRateText}</div>
         </article>
       </div>
     </section>
@@ -1944,6 +1972,41 @@ function SummarySettingsForm({
             <span>{labels.availableServices}</span>
             <ServicesDropdown initialServices={selectedServices} labels={labels} />
           </div>
+          <fieldset className="field full">
+            <legend>{labels.minuteLimitBehavior}</legend>
+            <div className="list">
+              {[
+                {
+                  description: labels.continueOverageDescription,
+                  label: labels.continueOverage,
+                  value: "continue_overage"
+                },
+                {
+                  description: labels.takeVoicemailDescription,
+                  label: labels.takeVoicemail,
+                  value: "voicemail"
+                },
+                {
+                  description: labels.forwardAtLimitDescription,
+                  label: labels.forwardAtLimit,
+                  value: "forward_owner"
+                }
+              ].map((option) => (
+                <label className="row-card checkbox-field" key={option.value}>
+                  <input
+                    defaultChecked={(business.minute_limit_policy ?? "continue_overage") === option.value}
+                    name="minuteLimitPolicy"
+                    type="radio"
+                    value={option.value}
+                  />
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small className="meta">{option.description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </div>
         {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
         {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
@@ -2502,6 +2565,11 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
                   <div className="call-summary-panel">
                     <span>{labels.callSummary}</span>
                     <p>{compactPreview(summary, 420)}</p>
+                    {call.voicemail_recording_url ? (
+                      <audio controls preload="none" src={`/api/owner/voicemail/${call.id}`}>
+                        <a href={`/api/owner/voicemail/${call.id}`}>{labels.playVoicemail}</a>
+                      </audio>
+                    ) : null}
                     {summaryRecord?.display_translation_pending ? <small className="meta">{labels.translationPending}</small> : null}
                   </div>
                 </article>

@@ -58,8 +58,8 @@ const loginCopy = {
   },
   admin: {
     en: {
-      heroTitle: "Onboard owners with confidence.",
-      heroBody: "Configure businesses, monitor usage, and keep Oficio AI accounts ready for launch.",
+      heroTitle: "Run your business from one dashboard.",
+      heroBody: "Ana answers calls, books jobs, and sends every job summary in Spanish or English.",
       welcome: "Welcome Back",
       subtitle: "Please login to your admin account",
       email: "Email address",
@@ -98,7 +98,7 @@ function PasswordEyeIcon() {
 }
 
 function HeroTitle({ language, variant }: { language: LoginLanguage; variant: "owner" | "admin" }) {
-  if (variant === "owner" && language === "en") {
+  if (language === "en") {
     return (
       <>
         Run your business from one <span className="hero-highlight">dashboard</span>.

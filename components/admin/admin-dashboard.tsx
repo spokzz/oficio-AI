@@ -9,7 +9,6 @@ import {
   deleteAdminAvailabilityException,
   onboardOwner,
   updateAdminAccount,
-  updateAdminBusinessName,
   updateAdminOwnerName,
   updateBusinessPhoneSetup
 } from "@/app/actions/admin";
@@ -21,7 +20,7 @@ import { aiCallPlanOptions, normalizeAiCallPlan } from "@/lib/call-usage";
 import { formatCurrency } from "@/lib/format";
 import { serviceOptions, type ServiceOption } from "@/lib/services";
 import type { AdminAccount, AdminPortalData } from "@/lib/admin-data";
-import type { ExistingNumberKind, PhoneSetupMode, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
+import type { MinuteLimitPolicy, PhoneSetupMode, SmsSetupStatus, VoiceSetupStatus } from "@/lib/types";
 
 export type AdminTab = "overview" | "onboarding" | "accounts" | "phone" | "usage" | "billing" | "playbook";
 
@@ -48,15 +47,26 @@ const smsStatusLabels: Record<SmsSetupStatus, string> = {
   transition: "SMS transition"
 };
 
-const existingNumberKindLabels: Record<ExistingNumberKind, string> = {
-  business: "Dedicated business number",
-  mixed: "Mixed business/personal number",
-  personal: "Owner personal cell",
-  unknown: "Not confirmed"
-};
 const businessStatusOptions = ["onboarding", "live", "needs_review", "paused", "canceled"] as const;
 const tradeOptions = ["landscaping", "roofing", "plumbing", "cleaning", "hvac", "other"] as const;
 const billingStatusOptions = ["trial", "active", "past_due", "paused", "canceled"] as const;
+const minuteLimitPolicyOptions: Array<{ description: string; label: string; value: MinuteLimitPolicy }> = [
+  {
+    description: "Ana keeps answering and extra minutes are billed at this account's overage rate.",
+    label: "Continue calls and bill overage",
+    value: "continue_overage"
+  },
+  {
+    description: "Callers leave their name, number, and reason for calling for owner follow-up.",
+    label: "Stop AI calls and take basic voicemail",
+    value: "voicemail"
+  },
+  {
+    description: "New calls go directly to the configured owner transfer cell.",
+    label: "Forward calls to owner",
+    value: "forward_owner"
+  }
+];
 
 const timeZoneOptions = [
   "America/New_York",
@@ -94,20 +104,53 @@ type OnboardingChecklistValues = {
   twilioRoutingPhone: string;
 };
 
+type OnboardingFormValues = OnboardingChecklistValues & {
+  bookingTimeZone: string;
+  includedMinutes: string;
+  monthlyPrice: string;
+  minuteLimitPolicy: MinuteLimitPolicy;
+  onboardingFee: string;
+  overageStartsAtMinutes: string;
+  ownerName: string;
+  ownerPassword: string;
+  ownerSummaryChannel: string;
+  ownerSummaryLanguage: string;
+  phoneSetupNotes: string;
+  planName: string;
+  trade: string;
+  overageRatePerMinute: string;
+};
+
 const defaultBusinessHoursText = "Monday through Friday, 8:00 AM to 5:00 PM";
-const defaultOnboardingValues: OnboardingChecklistValues = {
+const defaultPhoneSetupNotes =
+  "Capture porting readiness, forwarding instructions, customer-facing intro message, and any owner concerns. Do not store carrier account PINs here.";
+const defaultOnboardingValues: OnboardingFormValues = {
   aiAgentName: "Ana",
+  bookingTimeZone: "America/Chicago",
   businessAddress: "",
   businessHoursText: defaultBusinessHoursText,
   businessName: "",
   businessPhone: "",
   existingNumberKind: "unknown",
+  includedMinutes: String(normalizeAiCallPlan("Premium").allowanceMinutes),
   messagingServiceSid: "",
+  monthlyPrice: String(normalizeAiCallPlan("Premium").monthlyPrice),
+  minuteLimitPolicy: "continue_overage",
+  onboardingFee: "199",
+  overageStartsAtMinutes: String(normalizeAiCallPlan("Premium").overageStartsAtMinutes),
   ownerApproved: false,
   ownerEmail: "",
+  ownerName: "",
+  ownerPassword: "",
+  ownerSummaryChannel: "sms",
+  ownerSummaryLanguage: "en",
   ownerTransferPhone: "",
+  phoneSetupNotes: defaultPhoneSetupNotes,
+  planName: "Premium",
   radiusMiles: "30",
-  twilioRoutingPhone: ""
+  trade: "landscaping",
+  twilioRoutingPhone: "",
+  overageRatePerMinute: String(normalizeAiCallPlan("Premium").overageRatePerMinute)
 };
 
 const setupScenarios: Array<{
@@ -214,11 +257,125 @@ function formatMinutes(value: number) {
 function overageLabel(account: AdminAccount) {
   const usage = account.aiCallUsage;
 
-  if (!usage.overageRatePerMinute) {
+  if (usage.overageRatePerMinute === null) {
     return usage.overageMinutes > 0 ? `${formatMinutes(usage.overageMinutes)} min over allowance` : "No overage billing";
   }
 
-  return `${formatMinutes(usage.billableOverageMinutes)} min · ${formatCurrency(usage.overageAmount)}`;
+  return `${formatMinutes(usage.billableOverageMinutes)} min · ${formatCurrency(usage.overageAmount)} at ${formatCurrency(usage.overageRatePerMinute)}/min`;
+}
+
+function minuteLimitPolicyLabel(policy?: MinuteLimitPolicy | null) {
+  return minuteLimitPolicyOptions.find((option) => option.value === (policy ?? "continue_overage"))?.label ?? "Continue calls and bill overage";
+}
+
+function BillingPlanFields({
+  includedMinutes,
+  monthlyPrice,
+  overageStartsAtMinutes,
+  overageRatePerMinute,
+  planName
+}: {
+  includedMinutes?: number | null;
+  monthlyPrice?: number | null;
+  overageStartsAtMinutes?: number | null;
+  overageRatePerMinute?: number | null;
+  planName?: string | null;
+}) {
+  const initialPlan = normalizeAiCallPlan(planName);
+  const [selectedPlanName, setSelectedPlanName] = useState(initialPlan.label);
+  const [selectedMonthlyPrice, setSelectedMonthlyPrice] = useState(String(monthlyPrice ?? initialPlan.monthlyPrice));
+  const [selectedIncludedMinutes, setSelectedIncludedMinutes] = useState(String(includedMinutes ?? initialPlan.allowanceMinutes));
+  const [selectedOverageThreshold, setSelectedOverageThreshold] = useState(
+    String(overageStartsAtMinutes ?? initialPlan.overageStartsAtMinutes)
+  );
+  const [selectedOverageRate, setSelectedOverageRate] = useState(String(overageRatePerMinute ?? initialPlan.overageRatePerMinute));
+
+  const selectPlan = (nextPlanName: string) => {
+    const plan = normalizeAiCallPlan(nextPlanName);
+    setSelectedPlanName(plan.label);
+    setSelectedMonthlyPrice(String(plan.monthlyPrice));
+    setSelectedIncludedMinutes(String(plan.allowanceMinutes));
+    setSelectedOverageThreshold(String(plan.overageStartsAtMinutes));
+    setSelectedOverageRate(String(plan.overageRatePerMinute));
+  };
+
+  return (
+    <>
+      <label className="field">
+        <span>AI call plan</span>
+        <select name="planName" onChange={(event) => selectPlan(event.target.value)} value={selectedPlanName}>
+          {aiCallPlanOptions.map((plan) => (
+            <option key={plan.key} value={plan.label}>
+              {plan.label} · {formatCurrency(plan.monthlyPrice)}/mo · {formatMinutes(plan.allowanceMinutes)} min
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>Monthly price</span>
+        <div className="currency-input">
+          <span aria-hidden="true">$</span>
+          <input min="0" name="monthlyPrice" onChange={(event) => setSelectedMonthlyPrice(event.target.value)} step="0.01" type="number" value={selectedMonthlyPrice} />
+        </div>
+      </label>
+      <label className="field">
+        <span>Included minutes</span>
+        <input min="0" name="includedMinutes" onChange={(event) => setSelectedIncludedMinutes(event.target.value)} step="1" type="number" value={selectedIncludedMinutes} />
+      </label>
+      <label className="field">
+        <span>Overage starts at total minutes</span>
+        <input
+          min={selectedIncludedMinutes || "0"}
+          name="overageStartsAtMinutes"
+          onChange={(event) => setSelectedOverageThreshold(event.target.value)}
+          step="1"
+          type="number"
+          value={selectedOverageThreshold}
+        />
+      </label>
+      <label className="field">
+        <span>Overage price per minute</span>
+        <div className="currency-input">
+          <span aria-hidden="true">$</span>
+          <input min="0" name="overageRatePerMinute" onChange={(event) => setSelectedOverageRate(event.target.value)} step="0.01" type="number" value={selectedOverageRate} />
+        </div>
+      </label>
+    </>
+  );
+}
+
+function MinuteLimitPolicyFields({
+  defaultValue = "continue_overage",
+  onChange,
+  value
+}: {
+  defaultValue?: MinuteLimitPolicy;
+  onChange?: (value: MinuteLimitPolicy) => void;
+  value?: MinuteLimitPolicy;
+}) {
+  return (
+    <fieldset className="field full">
+      <legend>When monthly minutes are used</legend>
+      <div className="list">
+        {minuteLimitPolicyOptions.map((option) => (
+          <label className="row-card checkbox-field" key={option.value}>
+            <input
+              checked={value === undefined ? undefined : value === option.value}
+              defaultChecked={value === undefined ? defaultValue === option.value : undefined}
+              name="minuteLimitPolicy"
+              onChange={() => onChange?.(option.value)}
+              type="radio"
+              value={option.value}
+            />
+            <span>
+              <strong>{option.label}</strong>
+              <small className="meta">{option.description}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
 }
 
 function parseBusinessHours(value?: string | null): { days: BusinessDay[]; endTime: string; startTime: string } {
@@ -269,24 +426,6 @@ function minutesFromTimeLabel(value: string) {
   return hour * 60 + minutes;
 }
 
-function formChecklistValues(form: HTMLFormElement, businessHoursText: string): OnboardingChecklistValues {
-  const formData = new FormData(form);
-  return {
-    aiAgentName: String(formData.get("aiAgentName") ?? ""),
-    businessAddress: String(formData.get("businessAddress") ?? ""),
-    businessHoursText,
-    businessName: String(formData.get("businessName") ?? ""),
-    businessPhone: String(formData.get("businessPhone") ?? ""),
-    existingNumberKind: String(formData.get("existingNumberKind") ?? "unknown"),
-    messagingServiceSid: String(formData.get("messagingServiceSid") ?? ""),
-    ownerApproved: Boolean(formData.get("phoneSetupOwnerApproved")),
-    ownerEmail: String(formData.get("ownerEmail") ?? ""),
-    ownerTransferPhone: String(formData.get("ownerTransferPhone") ?? ""),
-    radiusMiles: String(formData.get("radiusMiles") ?? ""),
-    twilioRoutingPhone: String(formData.get("twilioRoutingPhone") ?? "")
-  };
-}
-
 function validEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -299,7 +438,7 @@ function validMessagingServiceSid(value: string) {
   return !value.trim() || /^MG[a-f0-9]{32}$/i.test(value.trim());
 }
 
-function launchChecklistItems(values: OnboardingChecklistValues, selectedMode: PhoneSetupMode) {
+function launchChecklistItems(values: OnboardingChecklistValues, selectedMode: PhoneSetupMode, twilioCredentialsReady: boolean) {
   const radius = Number(values.radiusMiles);
   const hours = parseBusinessHours(values.businessHoursText);
   const startMinutes = minutesFromTimeLabel(hours.startTime);
@@ -350,6 +489,13 @@ function launchChecklistItems(values: OnboardingChecklistValues, selectedMode: P
       ready: phoneSetupReady
     },
     {
+      detail: twilioCredentialsReady
+        ? "Platform Twilio Account SID and Auth Token are configured."
+        : "Configure the platform Twilio Account SID and Auth Token in the deployment environment.",
+      label: "Twilio credentials",
+      ready: twilioCredentialsReady
+    },
+    {
       detail: smsReady ? "SMS path is valid for this setup." : "Add a valid Messaging Service SID or choose SMS transition.",
       label: "SMS compliance",
       ready: smsReady
@@ -376,8 +522,14 @@ export function AdminDashboard({ data, activeTab, csrfToken }: { data: AdminPort
 
   return (
     <>
-      {activeTab === "overview" ? <Overview csrfToken={csrfToken} data={data} /> : null}
-      {activeTab === "onboarding" ? <Onboarding csrfToken={csrfToken} onQueuedCall={() => showToast("Test call queued for demo.")} /> : null}
+      {activeTab === "overview" ? <Overview data={data} /> : null}
+      {activeTab === "onboarding" ? (
+        <Onboarding
+          csrfToken={csrfToken}
+          onQueuedCall={() => showToast("Test call queued for demo.")}
+          twilioCredentials={data.twilioCredentials}
+        />
+      ) : null}
       {activeTab === "accounts" ? <Accounts csrfToken={csrfToken} data={data} onAction={() => showToast("Account opened for review.")} /> : null}
       {activeTab === "phone" ? <PhoneSetup csrfToken={csrfToken} data={data} /> : null}
       {activeTab === "usage" ? <Usage data={data} /> : null}
@@ -388,18 +540,18 @@ export function AdminDashboard({ data, activeTab, csrfToken }: { data: AdminPort
   );
 }
 
-function Overview({ csrfToken, data }: { csrfToken: string; data: AdminPortalData }) {
+function Overview({ data }: { data: AdminPortalData }) {
   return (
     <div className="grid">
       <div className="grid stats-grid">
-        <Stat featured label="MRR" value={formatCurrency(data.totals.monthlyRevenue)} foot="Manual billing" icon={<DollarIcon />} />
+        <Stat featured label="MRR" value={formatCurrency(data.totals.monthlyRevenue)} foot="Monthly revenue" icon={<DollarIcon />} />
         <Stat label="Businesses" value={data.totals.businesses} foot="Total accounts" icon={<UsersIcon />} />
         <Stat label="Live" value={data.totals.live} foot="Taking calls" icon={<MessageIcon />} />
-        <Stat label="Onboarding" value={data.totals.onboarding} foot="$199 setup" icon={<CalendarIcon />} />
+        <Stat label="Onboarding" value={data.totals.onboarding} foot="Setup fees tracked per account" icon={<CalendarIcon />} />
       </div>
       <section className="card">
         <h2>Account Health</h2>
-        <AccountTable csrfToken={csrfToken} data={data} />
+        <AccountTable data={data} />
       </section>
     </div>
   );
@@ -432,7 +584,7 @@ function Stat({
   );
 }
 
-function AccountTable({ csrfToken, data, onAction }: { csrfToken: string; data: AdminPortalData; onAction?: () => void }) {
+function AccountTable({ data }: { data: AdminPortalData }) {
   return (
     <div className="table-wrap">
       <table className="table">
@@ -441,30 +593,26 @@ function AccountTable({ csrfToken, data, onAction }: { csrfToken: string; data: 
             <th>Business</th>
             <th>Owner</th>
             <th>Trade</th>
-            <th>Phone setup</th>
             <th>Status</th>
             <th>Plan</th>
-            <th>Billing</th>
-            <th>Action</th>
+            <th>Next payment</th>
           </tr>
         </thead>
         <tbody>
           {data.accounts.map((account) => {
             const billing = account.manual_billing_accounts?.[0];
+            const owner = account.owners[0];
             return (
               <tr key={account.id}>
                 <td>
-                  <BusinessNameEditor account={account} csrfToken={csrfToken} />
+                  <strong>{account.name}</strong>
+                  <div className="meta">{account.base_address ?? "No address"}</div>
                 </td>
                 <td>
-                  <OwnerList account={account} csrfToken={csrfToken} />
+                  <strong>{owner?.full_name ?? "No owner linked"}</strong>
+                  <div className="meta">{owner?.phone ?? owner?.email ?? "No contact"}</div>
                 </td>
                 <td>{account.trade}</td>
-                <td>
-                  <div>{phoneSetupLabels[account.phone_setup_mode ?? "twilio_number"]}</div>
-                  <div className="meta">{existingNumberKindLabels[account.existing_number_kind ?? "unknown"]}</div>
-                  <div className="meta">{smsStatusLabels[account.sms_setup_status ?? "not_started"]}</div>
-                </td>
                 <td>
                   <StatusPill status={account.status} />
                 </td>
@@ -473,19 +621,11 @@ function AccountTable({ csrfToken, data, onAction }: { csrfToken: string; data: 
                   <div className="meta">
                     {formatMinutes(account.aiCallUsage.usedMinutes)} / {formatMinutes(account.aiCallUsage.allowanceMinutes)} min
                   </div>
+                  <div className="meta">
+                    Overage after {formatMinutes(account.aiCallUsage.overageStartsAtMinutes)} · {formatMinutes(account.aiCallUsage.overageMinutes)} billable
+                  </div>
                 </td>
-                <td>{billing?.billing_status ?? "not set"}</td>
-                <td>
-                  {onAction ? (
-                    <button className="button ghost" onClick={onAction} type="button">
-                      Review
-                    </button>
-                  ) : (
-                    <a className="button ghost" href="/admin?tab=accounts">
-                      Review
-                    </a>
-                  )}
-                </td>
+                <td>{formatDateOnly(billing?.next_payment_due_at)}</td>
               </tr>
             );
           })}
@@ -531,89 +671,6 @@ function accountReadiness(account: AdminAccount) {
   };
 }
 
-function AccountCard({ account, csrfToken, onAction }: { account: AdminAccount; csrfToken: string; onAction: () => void }) {
-  const billing = account.manual_billing_accounts?.[0];
-  const readiness = accountReadiness(account);
-  const ownerContact = account.owners[0]?.phone ?? account.owners[0]?.email ?? "No owner contact";
-
-  return (
-    <article className="admin-account-card">
-      <div className="admin-account-main">
-        <div className="admin-account-title-row">
-          <BusinessNameEditor account={account} csrfToken={csrfToken} />
-          <StatusPill status={account.status} />
-        </div>
-        <div className="admin-account-meta-grid">
-          <div>
-            <span>Owner</span>
-            <OwnerList account={account} csrfToken={csrfToken} />
-          </div>
-          <div>
-            <span>Trade</span>
-            <strong>{account.trade}</strong>
-          </div>
-          <div>
-            <span>AI agent</span>
-            <strong>{account.ai_voice_name ?? "Ana"}</strong>
-          </div>
-          <div>
-            <span>Owner contact</span>
-            <strong>{ownerContact}</strong>
-          </div>
-        </div>
-        <div className="admin-account-address">
-          <span>Service base</span>
-          <strong>{account.base_address ?? "No address configured"}</strong>
-        </div>
-      </div>
-
-      <div className="admin-account-side">
-        <div className="admin-account-readiness">
-          <div>
-            <span>Launch readiness</span>
-            <strong>{readiness.label}</strong>
-          </div>
-          <div className="readiness-checks">
-            {readiness.checks.map((check) => (
-              <span className={check.ready ? "ready" : "missing"} key={check.label}>
-                {check.label}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="admin-account-status-grid">
-          <div>
-            <span>Phone path</span>
-            <strong>{phoneSetupLabels[account.phone_setup_mode ?? "twilio_number"]}</strong>
-          </div>
-          <div>
-            <span>Voice</span>
-            <strong>{voiceStatusLabels[account.voice_setup_status ?? "not_started"]}</strong>
-          </div>
-          <div>
-            <span>SMS</span>
-            <strong>{smsStatusLabels[account.sms_setup_status ?? "not_started"]}</strong>
-          </div>
-          <div>
-            <span>Billing</span>
-            <strong>{billing?.billing_status ?? "not set"} · {formatCurrency(billing?.monthly_price ?? 0)}</strong>
-          </div>
-        </div>
-
-        <div className="admin-account-actions">
-          <button className="button ghost" onClick={onAction} type="button">
-            Review
-          </button>
-          <a className="button primary" href={`/admin?tab=phone`}>
-            Phone setup
-          </a>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function SaveSetupButton() {
   const { pending } = useFormStatus();
 
@@ -631,21 +688,6 @@ function InlineNameSaveButton() {
     <button className="inline-edit-save" disabled={pending} type="submit">
       {pending ? "Saving" : "Save"}
     </button>
-  );
-}
-
-function BusinessNameEditor({ account, csrfToken }: { account: AdminAccount; csrfToken: string }) {
-  const [state, formAction] = useActionState(updateAdminBusinessName, {});
-
-  return (
-    <form action={formAction} className="inline-edit-form">
-      <CsrfField token={csrfToken} />
-      <input name="businessId" type="hidden" value={account.id} />
-      <input className="inline-edit-input" defaultValue={account.name} maxLength={120} name="businessName" required />
-      <InlineNameSaveButton />
-      {state.error ? <span className="inline-edit-error">{state.error}</span> : null}
-      {state.success ? <span className="inline-edit-success">{state.success}</span> : null}
-    </form>
   );
 }
 
@@ -765,23 +807,42 @@ function BusinessHoursDropdowns({
   );
 }
 
-function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCall: () => void }) {
+function Onboarding({
+  csrfToken,
+  onQueuedCall,
+  twilioCredentials
+}: {
+  csrfToken: string;
+  onQueuedCall: () => void;
+  twilioCredentials: AdminPortalData["twilioCredentials"];
+}) {
   const [state, formAction] = useActionState(onboardOwner, {});
   const [selectedMode, setSelectedMode] = useState<PhoneSetupMode>("twilio_number");
-  const [checklistValues, setChecklistValues] = useState<OnboardingChecklistValues>(defaultOnboardingValues);
+  const [formValues, setFormValues] = useState<OnboardingFormValues>(defaultOnboardingValues);
   const selectedScenario = scenarioFor(selectedMode);
-  const checklistItems = launchChecklistItems(checklistValues, selectedMode);
-  const syncChecklist = (form: HTMLFormElement, businessHoursText = checklistValues.businessHoursText) => {
-    setChecklistValues(formChecklistValues(form, businessHoursText));
+  const checklistItems = launchChecklistItems(formValues, selectedMode, twilioCredentials.ready);
+  const updateFormValue = <Key extends keyof OnboardingFormValues>(key: Key, value: OnboardingFormValues[Key]) => {
+    setFormValues((current) => ({ ...current, [key]: value }));
   };
   const handleBusinessHoursTextChange = useCallback((value: string) => {
-    setChecklistValues((current) => (current.businessHoursText === value ? current : { ...current, businessHoursText: value }));
+    setFormValues((current) => (current.businessHoursText === value ? current : { ...current, businessHoursText: value }));
   }, []);
   const handleModeSelect = (mode: PhoneSetupMode) => {
     setSelectedMode(mode);
-    setChecklistValues((current) => ({
+    setFormValues((current) => ({
       ...current,
       existingNumberKind: mode === "port_existing" ? "business" : current.existingNumberKind
+    }));
+  };
+  const handlePlanSelect = (planName: string) => {
+    const plan = normalizeAiCallPlan(planName);
+    setFormValues((current) => ({
+      ...current,
+      includedMinutes: String(plan.allowanceMinutes),
+      monthlyPrice: String(plan.monthlyPrice),
+      overageStartsAtMinutes: String(plan.overageStartsAtMinutes),
+      overageRatePerMinute: String(plan.overageRatePerMinute),
+      planName: plan.label
     }));
   };
 
@@ -789,7 +850,7 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
     <div className="grid">
       <section className="card">
         <h2>New Owner Setup</h2>
-        <form action={formAction} onChange={(event) => syncChecklist(event.currentTarget)} onInput={(event) => syncChecklist(event.currentTarget)}>
+        <form action={formAction}>
           <CsrfField token={csrfToken} />
           <div className="form-grid">
             <p className="meta full">
@@ -797,33 +858,33 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
             </p>
             <label className="field">
               <span>Business name</span>
-              <input name="businessName" placeholder="Green Valley Landscaping" required />
+              <input name="businessName" onChange={(event) => updateFormValue("businessName", event.target.value)} placeholder="Green Valley Landscaping" required value={formValues.businessName} />
             </label>
             <label className="field">
               <span>Owner name</span>
-              <input name="ownerName" placeholder="Lowa Winter" />
+              <input name="ownerName" onChange={(event) => updateFormValue("ownerName", event.target.value)} placeholder="Lowa Winter" value={formValues.ownerName} />
             </label>
             <label className="field">
               <span>Owner email</span>
-              <input name="ownerEmail" placeholder="owner@example.com" required type="email" />
+              <input name="ownerEmail" onChange={(event) => updateFormValue("ownerEmail", event.target.value)} placeholder="owner@example.com" required type="email" value={formValues.ownerEmail} />
             </label>
             <label className="field">
               <span>Temporary password</span>
-              <input name="ownerPassword" placeholder="At least 8 characters" type="password" />
+              <input name="ownerPassword" onChange={(event) => updateFormValue("ownerPassword", event.target.value)} placeholder="At least 8 characters" type="password" value={formValues.ownerPassword} />
             </label>
             <label className="field">
               <span>Trade</span>
-              <select defaultValue="landscaping" name="trade">
+              <select name="trade" onChange={(event) => updateFormValue("trade", event.target.value)} value={formValues.trade}>
                 <option value="landscaping">Landscaping</option>
                 <option value="roofing">Roofing</option>
                 <option value="plumbing">Plumbing</option>
                 <option value="cleaning">Cleaning</option>
               </select>
             </label>
-            <AddressLookupInput className="full" label="Business address" name="businessAddress" placeholder="123 Main St, Austin, TX" />
+            <AddressLookupInput className="full" label="Business address" name="businessAddress" onValueChange={(value) => updateFormValue("businessAddress", value)} placeholder="123 Main St, Austin, TX" value={formValues.businessAddress} />
             <label className="field">
               <span>Service radius</span>
-              <select defaultValue="30" name="radiusMiles">
+              <select name="radiusMiles" onChange={(event) => updateFormValue("radiusMiles", event.target.value)} value={formValues.radiusMiles}>
                 <option value="15">15 miles</option>
                 <option value="30">30 miles</option>
                 <option value="45">45 miles</option>
@@ -831,25 +892,25 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
             </label>
             <label className="field">
               <span>AI agent name</span>
-              <input defaultValue="Ana" maxLength={40} name="aiAgentName" placeholder="Ana" required />
+              <input maxLength={40} name="aiAgentName" onChange={(event) => updateFormValue("aiAgentName", event.target.value)} placeholder="Ana" required value={formValues.aiAgentName} />
             </label>
             <label className="field">
               <span>Owner summary language</span>
-              <select defaultValue="en" name="ownerSummaryLanguage">
+              <select name="ownerSummaryLanguage" onChange={(event) => updateFormValue("ownerSummaryLanguage", event.target.value)} value={formValues.ownerSummaryLanguage}>
                 <option value="en">English</option>
 	                <option value="es">Español</option>
               </select>
             </label>
             <label className="field">
               <span>Owner summary method</span>
-              <select defaultValue="sms" name="ownerSummaryChannel">
+              <select name="ownerSummaryChannel" onChange={(event) => updateFormValue("ownerSummaryChannel", event.target.value)} value={formValues.ownerSummaryChannel}>
                 <option value="sms">SMS text</option>
                 <option value="email">Email</option>
               </select>
             </label>
             <label className="field">
               <span>Booking time zone</span>
-              <select defaultValue="America/Chicago" name="bookingTimeZone">
+              <select name="bookingTimeZone" onChange={(event) => updateFormValue("bookingTimeZone", event.target.value)} value={formValues.bookingTimeZone}>
                 {timeZoneOptions.map((timeZone) => (
                   <option key={timeZone} value={timeZone}>
                     {timeZone}
@@ -863,6 +924,80 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
                 onTextChange={handleBusinessHoursTextChange}
               />
             </div>
+            <label className="field">
+              <span>AI call plan</span>
+              <select name="planName" onChange={(event) => handlePlanSelect(event.target.value)} value={formValues.planName}>
+                {aiCallPlanOptions.map((plan) => (
+                  <option key={plan.key} value={plan.label}>
+                    {plan.label} · {formatCurrency(plan.monthlyPrice)}/mo · {formatMinutes(plan.allowanceMinutes)} min
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Monthly price</span>
+              <div className="currency-input">
+                <span aria-hidden="true">$</span>
+                <input min="0" name="monthlyPrice" onChange={(event) => updateFormValue("monthlyPrice", event.target.value)} step="0.01" type="number" value={formValues.monthlyPrice} />
+              </div>
+            </label>
+            <label className="field">
+              <span>Included minutes</span>
+              <input min="0" name="includedMinutes" onChange={(event) => updateFormValue("includedMinutes", event.target.value)} step="1" type="number" value={formValues.includedMinutes} />
+            </label>
+            <label className="field">
+              <span>Overage starts at total minutes</span>
+              <input
+                min={formValues.includedMinutes || "0"}
+                name="overageStartsAtMinutes"
+                onChange={(event) => updateFormValue("overageStartsAtMinutes", event.target.value)}
+                step="1"
+                type="number"
+                value={formValues.overageStartsAtMinutes}
+              />
+            </label>
+            <label className="field">
+              <span>Overage price per minute</span>
+              <div className="currency-input">
+                <span aria-hidden="true">$</span>
+                <input min="0" name="overageRatePerMinute" onChange={(event) => updateFormValue("overageRatePerMinute", event.target.value)} step="0.01" type="number" value={formValues.overageRatePerMinute} />
+              </div>
+            </label>
+            <label className="field">
+              <span>Setup fee</span>
+              <div className="currency-input">
+                <span aria-hidden="true">$</span>
+                <input min="0" name="onboardingFee" onChange={(event) => updateFormValue("onboardingFee", event.target.value)} step="0.01" type="number" value={formValues.onboardingFee} />
+              </div>
+            </label>
+            <div className="field">
+              <span>First monthly payment due</span>
+              <div className="admin-service-placeholder">Automatically set to one calendar month after account creation.</div>
+            </div>
+            <MinuteLimitPolicyFields
+              onChange={(value) => updateFormValue("minuteLimitPolicy", value)}
+              value={formValues.minuteLimitPolicy}
+            />
+          </div>
+          <div className="setup-guidance">
+            <article className="row-card">
+              <div className="section-card-header">
+                <div>
+                  <strong>Twilio platform credentials</strong>
+                  <div className="meta">
+                    Shared by all customer accounts. Keep the Auth Token in server environment variables, not in customer records.
+                  </div>
+                </div>
+                <StatusPill
+                  label={twilioCredentials.ready ? "Configured" : "Needs configuration"}
+                  status={twilioCredentials.ready ? "confirmed" : "needs_review"}
+                />
+              </div>
+              <div className="meta">
+                Account SID: {twilioCredentials.accountSidConfigured ? "configured" : "missing"} · Auth Token:{" "}
+                {twilioCredentials.authTokenConfigured ? "configured" : "missing"}
+              </div>
+            </article>
           </div>
           <PhoneScenarioPicker selectedMode={selectedMode} onSelect={handleModeSelect} />
           <div className="setup-guidance">
@@ -879,7 +1014,7 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
           <div className="form-grid" style={{ marginTop: 16 }}>
             <label className="field">
               <span>Existing number type</span>
-              <select value={checklistValues.existingNumberKind} name="existingNumberKind" onChange={(event) => setChecklistValues((current) => ({ ...current, existingNumberKind: event.target.value }))}>
+              <select value={formValues.existingNumberKind} name="existingNumberKind" onChange={(event) => updateFormValue("existingNumberKind", event.target.value)}>
                 <option value="unknown">Not confirmed</option>
                 <option value="business">Dedicated business number</option>
                 <option value="personal">Owner personal cell</option>
@@ -888,29 +1023,30 @@ function Onboarding({ csrfToken, onQueuedCall }: { csrfToken: string; onQueuedCa
             </label>
             <label className="field">
               <span>Business public number</span>
-              <input name="businessPhone" placeholder="+13125551234" type="tel" />
+              <input name="businessPhone" onChange={(event) => updateFormValue("businessPhone", event.target.value)} placeholder="+13125551234" type="tel" value={formValues.businessPhone} />
             </label>
             <label className="field">
               <span>Twilio routing number</span>
-              <input name="twilioRoutingPhone" placeholder="Client Twilio number, e.g. +13125559876" type="tel" />
+              <input name="twilioRoutingPhone" onChange={(event) => updateFormValue("twilioRoutingPhone", event.target.value)} placeholder="Client Twilio number, e.g. +13125559876" type="tel" value={formValues.twilioRoutingPhone} />
             </label>
             <label className="field">
               <span>Owner private cell for transfers</span>
-              <input name="ownerTransferPhone" placeholder="Owner real phone, e.g. +13125554321" type="tel" />
+              <input name="ownerTransferPhone" onChange={(event) => updateFormValue("ownerTransferPhone", event.target.value)} placeholder="Owner real phone, e.g. +13125554321" type="tel" value={formValues.ownerTransferPhone} />
             </label>
             <label className="field">
               <span>Messaging Service SID</span>
-              <input name="messagingServiceSid" placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+              <input name="messagingServiceSid" onChange={(event) => updateFormValue("messagingServiceSid", event.target.value)} placeholder="MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" value={formValues.messagingServiceSid} />
             </label>
             <label className="field full checkbox-field">
-              <input name="phoneSetupOwnerApproved" type="checkbox" />
+              <input checked={formValues.ownerApproved} name="phoneSetupOwnerApproved" onChange={(event) => updateFormValue("ownerApproved", event.target.checked)} type="checkbox" />
               <span>Owner approved this phone setup path and understands what number customers will see.</span>
             </label>
             <label className="field full">
               <span>Phone setup notes</span>
               <textarea
-                defaultValue="Capture porting readiness, forwarding instructions, customer-facing intro message, and any owner concerns. Do not store carrier account PINs here."
                 name="phoneSetupNotes"
+                onChange={(event) => updateFormValue("phoneSetupNotes", event.target.value)}
+                value={formValues.phoneSetupNotes}
               />
             </label>
           </div>
@@ -988,7 +1124,7 @@ function Accounts({ csrfToken, data, onAction }: { csrfToken: string; data: Admi
             <strong>{needsSetup}</strong>
           </div>
           <div>
-            <span>MRR</span>
+            <span>Monthly revenue</span>
             <strong>{formatCurrency(monthlyRevenue)}</strong>
           </div>
         </div>
@@ -1128,13 +1264,17 @@ function AccountDetailsModal({
     { label: "Public number", value: account.phone ?? "Not set" },
     { label: "Routing number", value: account.twilio_routing_phone ?? "Not set" },
     { label: "Owner transfer", value: account.owner_transfer_phone ?? "Not set" },
-    { label: "Billing", value: `${billing?.billing_status ?? "not set"} · ${formatCurrency(billing?.monthly_price ?? 0)}` },
+    {
+      label: "Billing",
+      value: `${account.aiCallUsage.planName} · ${formatCurrency(billing?.monthly_price ?? 0)}/mo · ${formatMinutes(account.aiCallUsage.allowanceMinutes)} min included · overage after ${formatMinutes(account.aiCallUsage.overageStartsAtMinutes)} total min · ${formatCurrency(account.aiCallUsage.overageRatePerMinute ?? 0)}/min`
+    },
+    { label: "At minute limit", value: minuteLimitPolicyLabel(account.minute_limit_policy), full: true },
     {
       label: "AI minutes",
       value: `${formatMinutes(account.aiCallUsage.usedMinutes)} used / ${formatMinutes(account.aiCallUsage.allowanceMinutes)} included`
     },
     { label: "Remaining minutes", value: `${formatMinutes(account.aiCallUsage.remainingMinutes)} this month` },
-    { label: "Overage", value: overageLabel(account) },
+    { label: "Overage", value: `Starts after ${formatMinutes(account.aiCallUsage.overageStartsAtMinutes)} total min · ${overageLabel(account)}` },
     { label: "Readiness", value: readiness.label },
     { label: "Closed dates", value: closures.length ? closures.map((closure) => formatClosureRange(closure.starts_on, closure.ends_on)).join(", ") : "None", full: true }
   ];
@@ -1382,23 +1522,20 @@ function EditAccountModal({
               <option value="email">Email</option>
             </select>
           </label>
-          <label className="field">
-            <span>AI call plan</span>
-            <select defaultValue={normalizeAiCallPlan(billing?.plan_name).label} name="planName">
-              {aiCallPlanOptions.map((plan) => (
-                <option key={plan.key} value={plan.label}>
-                  {plan.label} · {formatMinutes(plan.allowanceMinutes)} min/month
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Monthly price</span>
-            <input defaultValue={billing?.monthly_price ?? 149} min="0" name="monthlyPrice" step="0.01" type="number" />
-          </label>
+          <BillingPlanFields
+            includedMinutes={billing?.included_minutes}
+            monthlyPrice={billing?.monthly_price}
+            overageStartsAtMinutes={billing?.overage_starts_at_minutes}
+            overageRatePerMinute={billing?.overage_rate_per_minute}
+            planName={billing?.plan_name}
+          />
+          <MinuteLimitPolicyFields defaultValue={account.minute_limit_policy ?? "continue_overage"} />
           <label className="field">
             <span>Onboarding fee</span>
-            <input defaultValue={billing?.onboarding_fee ?? 199} min="0" name="onboardingFee" step="0.01" type="number" />
+            <div className="currency-input">
+              <span aria-hidden="true">$</span>
+              <input defaultValue={billing?.onboarding_fee ?? 199} min="0" name="onboardingFee" step="0.01" type="number" />
+            </div>
           </label>
           <label className="field">
             <span>Billing status</span>
@@ -1698,6 +1835,7 @@ function PhoneSetupForm({ account, csrfToken }: { account: AdminAccount; csrfTok
               name="businessHoursText"
             />
           </label>
+          <MinuteLimitPolicyFields defaultValue={account.minute_limit_policy ?? "continue_overage"} />
           <label className="field full checkbox-field">
             <input defaultChecked={account.phone_setup_owner_approved} name="phoneSetupOwnerApproved" type="checkbox" />
             <span>Owner approved this path and understands what number customers will see.</span>
@@ -1733,7 +1871,7 @@ function Usage({ data }: { data: AdminPortalData }) {
       <div className="grid stats-grid">
         <Stat featured label="Used minutes" value={formatMinutes(totalUsedMinutes)} foot={data.accounts[0]?.aiCallUsage.monthLabel ?? "Current month"} icon={<MessageIcon />} />
         <Stat label="Included minutes" value={formatMinutes(totalIncludedMinutes)} foot="Across all accounts" icon={<CalendarIcon />} />
-        <Stat label="VIP overage" value={formatCurrency(totalOverageAmount)} foot="$0.05/min after 600" icon={<DollarIcon />} />
+        <Stat label="Overage charges" value={formatCurrency(totalOverageAmount)} foot="Per-account plan rates" icon={<DollarIcon />} />
         <Stat label="Accounts" value={data.accounts.length} foot="Tracked customers" icon={<UsersIcon />} />
       </div>
       <section className="card">
@@ -1751,7 +1889,8 @@ function Usage({ data }: { data: AdminPortalData }) {
                 <th>Plan</th>
                 <th>Used</th>
                 <th>Remaining</th>
-                <th>Overage</th>
+                <th>Extra minutes</th>
+                <th>Overage charge</th>
                 <th>Month</th>
               </tr>
             </thead>
@@ -1767,7 +1906,7 @@ function Usage({ data }: { data: AdminPortalData }) {
                     </td>
                     <td>
                       <div>{usage.planName}</div>
-                      <div className="meta">{formatMinutes(usage.allowanceMinutes)} included</div>
+                      <div className="meta">{formatMinutes(usage.allowanceMinutes)} included · overage after {formatMinutes(usage.overageStartsAtMinutes)}</div>
                     </td>
                     <td>
                       <div>{formatMinutes(usage.usedMinutes)} min</div>
@@ -1776,7 +1915,11 @@ function Usage({ data }: { data: AdminPortalData }) {
                       </div>
                     </td>
                     <td>{formatMinutes(usage.remainingMinutes)} min</td>
-                    <td>{overageLabel(account)}</td>
+                    <td>{formatMinutes(usage.overageMinutes)} min</td>
+                    <td>
+                      <div>{formatCurrency(usage.overageAmount)}</div>
+                      <div className="meta">{formatCurrency(usage.overageRatePerMinute ?? 0)}/min</div>
+                    </td>
                     <td>{usage.monthLabel}</td>
                   </tr>
                 );
@@ -1798,6 +1941,7 @@ function Billing({ data, onAction }: { data: AdminPortalData; onAction: () => vo
           <thead>
             <tr>
               <th>Business</th>
+              <th>Plan</th>
               <th>Monthly</th>
               <th>Onboarding</th>
               <th>Status</th>
@@ -1811,6 +1955,12 @@ function Billing({ data, onAction }: { data: AdminPortalData; onAction: () => vo
               return (
                 <tr key={account.id}>
                   <td>{account.name}</td>
+                  <td>
+                    <div>{account.aiCallUsage.planName}</div>
+                    <div className="meta">
+                      {formatMinutes(account.aiCallUsage.allowanceMinutes)} included · overage after {formatMinutes(account.aiCallUsage.overageStartsAtMinutes)} · {formatCurrency(account.aiCallUsage.overageRatePerMinute ?? 0)}/min
+                    </div>
+                  </td>
                   <td>{formatCurrency(billing?.monthly_price ?? 149)}</td>
                   <td>{billing?.onboarding_paid ? "Paid" : formatCurrency(billing?.onboarding_fee ?? 199)}</td>
                   <td>{billing?.billing_status ?? "trial"}</td>

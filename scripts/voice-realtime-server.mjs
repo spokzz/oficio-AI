@@ -80,6 +80,7 @@ const TOOL_TEXT_LIMITS = {
   notes: 700,
   preferred_date: 80,
   preferred_time: 80,
+  property_access_notes: 500,
   reason: 180,
   scheduled_date: 20,
   scheduled_time: 20,
@@ -316,8 +317,16 @@ function sanitizeToolArgs(args) {
 
 function missingToolFields(toolName, args) {
   const requiredFields = {
-    book_appointment: ["address_confirmed", "customer_name", "scheduled_date", "scheduled_time", "service_type"],
-    record_call_summary: ["customer_name", "summary"]
+    book_appointment: [
+      "address_confirmed",
+      "customer_name",
+      "property_access_confirmed",
+      "property_access_notes",
+      "scheduled_date",
+      "scheduled_time",
+      "service_type"
+    ],
+    record_call_summary: ["customer_name", "property_access_confirmed", "property_access_notes", "summary"]
   }[toolName];
 
   if (!requiredFields) return [];
@@ -365,6 +374,19 @@ function validateToolArgs(toolName, rawArgs) {
       ok: false,
       reason: "invalid_scheduled_date",
       message: "Ask for the appointment date again before using the tool."
+    };
+  }
+
+  if (
+    ["book_appointment", "record_call_summary"].includes(toolName) &&
+    args.property_access_confirmed !== true
+  ) {
+    return {
+      args,
+      ok: false,
+      reason: "property_access_not_confirmed",
+      message:
+        "Before saving, ask whether the crew should know anything about accessing the property, such as pets, gates or gate codes, parking, unit/building instructions, or other access concerns. If there are none or the caller declines, use 'None reported' or 'Caller declined' and set property_access_confirmed true."
     };
   }
 
@@ -547,7 +569,17 @@ function ownerMissingList(items, language) {
   return missing.join(", ");
 }
 
-function friendlyLeadSummary({ address, customerName, customerPhone, details, language, scheduledFor, serviceType }) {
+function propertyAccessNotes(value) {
+  return compactTextLine(value, 500).replace(/[.!?]+$/, "") || "None reported";
+}
+
+function jobAiNotes({ details, propertyAccess }) {
+  const detailText = compactCallText(details, 700);
+  const accessText = propertyAccessNotes(propertyAccess);
+  return [detailText, `Property access: ${accessText}.`].filter(Boolean).join(" ");
+}
+
+function friendlyLeadSummary({ address, customerName, customerPhone, details, language, propertyAccess, scheduledFor, serviceType }) {
   const name = customerName || ownerMissingValue(language);
   const phone = customerPhone || ownerMissingValue(language);
   const service = ownerServiceLabel(serviceType, language);
@@ -562,6 +594,7 @@ function friendlyLeadSummary({ address, customerName, customerPhone, details, la
     language
   );
   const note = compactTextLine(details, 220);
+  const access = propertyAccessNotes(propertyAccess);
 
   if (language === "es") {
     return [
@@ -570,6 +603,7 @@ function friendlyLeadSummary({ address, customerName, customerPhone, details, la
       `Solicitud: ${service}${timing !== ownerMissingValue(language) ? ` para ${timing}` : ""}. Direccion: ${location}.`,
       `Informacion faltante: ${missingInfo}.`,
       note ? `Notas: ${note}.` : "",
+      `Acceso a la propiedad: ${access}.`,
       "Accion necesaria: revisar el lead y contactar al cliente si falta informacion o si requiere aprobacion."
     ]
       .filter(Boolean)
@@ -582,24 +616,27 @@ function friendlyLeadSummary({ address, customerName, customerPhone, details, la
     `Request: ${service}${timing !== ownerMissingValue(language) ? ` for ${timing}` : ""}. Address: ${location}.`,
     `Missing information: ${missingInfo}.`,
     note ? `Notes: ${note}.` : "",
+    `Property access: ${access}.`,
     "Action needed: review the lead and contact the customer if information is missing or approval is needed."
   ]
     .filter(Boolean)
     .join(" ");
 }
 
-function friendlyBookingSummary({ address, customerName, customerPhone, language, ownerApprovalSent, scheduledFor, serviceType }) {
+function friendlyBookingSummary({ address, customerName, customerPhone, language, ownerApprovalSent, propertyAccess, scheduledFor, serviceType }) {
   const service = ownerServiceLabel(serviceType, language);
   const name = customerName || ownerMissingValue(language);
   const phone = customerPhone || ownerMissingValue(language);
   const location = address || ownerMissingValue(language);
   const timing = scheduledFor || ownerMissingValue(language);
+  const access = propertyAccessNotes(propertyAccess);
 
   if (language === "es") {
     return [
       `${ownerApprovalSent ? "Nueva solicitud de cita" : "Nuevo cliente potencial"} para ${service}.`,
       `Cliente: ${name}. Telefono: ${phone}.`,
       `Solicitud: ${service} para ${timing}. Direccion: ${location}.`,
+      `Acceso a la propiedad: ${access}.`,
       "Informacion faltante: Ninguna informacion clave pendiente.",
       ownerApprovalSent
         ? "Accion necesaria: revisar y aprobar la cita antes de confirmarla con el cliente."
@@ -611,6 +648,7 @@ function friendlyBookingSummary({ address, customerName, customerPhone, language
     `${ownerApprovalSent ? "New appointment request" : "New lead"} for ${service}.`,
     `Customer: ${name}. Phone: ${phone}.`,
     `Request: ${service} for ${timing}. Address: ${location}.`,
+    `Property access: ${access}.`,
     "Missing information: No key information missing.",
     ownerApprovalSent
       ? "Action needed: review and approve the appointment before confirming with the customer."
@@ -618,12 +656,13 @@ function friendlyBookingSummary({ address, customerName, customerPhone, language
   ].join(" ");
 }
 
-function ownerSummarySmsBody({ address, customerName, customerPhone, language, requestedFor, serviceType, status }) {
+function ownerSummarySmsBody({ address, customerName, customerPhone, language, propertyAccess, requestedFor, serviceType, status }) {
   const service = ownerServiceLabel(serviceType || "service", language);
   const phone = customerPhone || ownerMissingValue(language);
   const name = customerName || ownerMissingValue(language);
   const location = address || ownerMissingValue(language);
   const requested = requestedFor || ownerMissingValue(language);
+  const access = propertyAccessNotes(propertyAccess);
 
   if (language === "es") {
     return [
@@ -634,6 +673,7 @@ function ownerSummarySmsBody({ address, customerName, customerPhone, language, r
       `Fecha solicitada: ${requested}`,
       `Nombre: ${name}`,
       `Direccion: ${location}`,
+      `Acceso: ${access}`,
       "",
       `Accion: ${status === "approval" ? "Revisar/aprobar antes de confirmar." : "Revisar y contactar al cliente si falta informacion."}`
     ].join("\n");
@@ -647,6 +687,7 @@ function ownerSummarySmsBody({ address, customerName, customerPhone, language, r
     `Requested: ${requested}`,
     `Name: ${name}`,
     `Address: ${location}`,
+    `Access: ${access}`,
     "",
     `Action: ${status === "approval" ? "Review/approve before confirming." : "Review and contact the customer if information is missing."}`
   ].join("\n");
@@ -1771,8 +1812,20 @@ function customerBookingConfirmationText({ address, agent, businessName, custome
   return `${greeting}, this is ${cleanToolText(agent, 40)} with ${cleanToolText(businessName, 120)}. Your ${serviceLabel(serviceType)} appointment is confirmed for ${spokenDateTime(start, timeZone)}${location}. Reply here if you need to update it.`;
 }
 
-function ownerBookingApprovalText({ address, agent, businessName, customerName, customerPhone, estimatedValue, serviceType, start, timeZone }) {
+function ownerBookingApprovalText({
+  address,
+  agent,
+  businessName,
+  customerName,
+  customerPhone,
+  estimatedValue,
+  propertyAccess,
+  serviceType,
+  start,
+  timeZone
+}) {
   const location = address ? `\nAddress: ${cleanToolText(address, 180)}` : "";
+  const access = `Access: ${propertyAccessNotes(propertyAccess)}`;
   const value = Number.isFinite(Number(estimatedValue)) ? Number(estimatedValue) : 0;
   return [
     `${cleanToolText(agent, 40)} booking request for ${cleanToolText(businessName, 120)}:`,
@@ -1780,6 +1833,7 @@ function ownerBookingApprovalText({ address, agent, businessName, customerName, 
     `${serviceLabel(serviceType)} - ${spokenDateTime(start, timeZone)}`,
     `Value: $${Math.round(value)}`,
     `${location}`,
+    access,
     "Reply YES to confirm and text the customer. Reply NO to keep it as a lead."
   ]
     .filter(Boolean)
@@ -1794,6 +1848,7 @@ async function createOwnerBookingConfirmation({
   estimatedValue,
   jobId,
   ownerPhone,
+  propertyAccess,
   serviceType,
   start,
   supabase,
@@ -1820,6 +1875,7 @@ async function createOwnerBookingConfirmation({
     customerName: customer.full_name,
     customerPhone,
     estimatedValue,
+    propertyAccess,
     serviceType,
     start,
     timeZone
@@ -1880,6 +1936,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
   const providedAddress = normalizeAddressForStorage(args.address);
   const savedAddress = normalizeAddressForStorage(existingCustomer?.address);
   const addressConfirmed = addressConfirmedValue(args.address_confirmed);
+  const propertyAccess = propertyAccessNotes(args.property_access_notes);
   const customerFullName = requireCustomerFullName({ args, callerPhone, existingCustomer });
 
   if (!serviceOptions.includes(args.service_type)) {
@@ -1925,6 +1982,14 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
       ok: false,
       message:
         "Before booking, repeat the service address in a friendly way and ask the caller to confirm it. Only call book_appointment again after they confirm."
+    };
+  }
+
+  if (args.property_access_confirmed !== true) {
+    return {
+      ok: false,
+      message:
+        "After collecting the basic booking details, ask whether the crew should know anything about accessing the property, such as pets, gates or gate codes, parking, unit/building instructions, or other access concerns."
     };
   }
 
@@ -2015,7 +2080,10 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
     .from("jobs")
     .insert({
       address: address || customer.address || null,
-      ai_notes: args.notes || "Booked by Ana from a realtime phone call.",
+      ai_notes: jobAiNotes({
+        details: args.notes || "Booked by Ana from a realtime phone call.",
+        propertyAccess
+      }),
       business_id: businessId,
       customer_id: customer.id,
       estimated_value: appointmentEstimatedValue(args, customer),
@@ -2051,6 +2119,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
     estimatedValue: appointmentEstimatedValue(args, customer),
     jobId: job.id,
     ownerPhone,
+    propertyAccess,
     serviceType: args.service_type,
     start,
     supabase,
@@ -2089,6 +2158,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 	      customerPhone,
 	      language,
 	      ownerApprovalSent: ownerApproval.ok,
+	      propertyAccess,
 	      scheduledFor,
 	      serviceType: args.service_type
 	    });
@@ -2097,6 +2167,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 	      customerName: customer.full_name,
 	      customerPhone,
 	      language,
+	      propertyAccess,
 	      requestedFor: scheduledFor,
 	      serviceType: args.service_type,
 	      status: ownerApproval.ok ? "approval" : "lead"
@@ -2133,6 +2204,7 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
   const existingCustomer = callSessionId ? await getKnownCustomerForCall({ callSessionId, supabase }) : null;
   const address = normalizeAddressForStorage(args.address);
   const addressConfirmed = addressConfirmedValue(args.address_confirmed);
+  const propertyAccess = propertyAccessNotes(args.property_access_notes);
   const customerFullName = requireCustomerFullName({ args, callerPhone, existingCustomer });
   const serviceType = isServiceOption(args.service_type) ? args.service_type : extractedServiceType(args.summary, businessServiceOptions(business));
   const serviceRequested = Boolean(serviceType || args.service_type);
@@ -2166,6 +2238,14 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
       ok: false,
       message:
         "Before saving the lead, repeat the service address in a friendly way and ask the caller to confirm it. Only call record_call_summary again after they confirm."
+    };
+  }
+
+  if (args.property_access_confirmed !== true) {
+    return {
+      ok: false,
+      message:
+        "After collecting the basic lead details, ask whether the crew should know anything about accessing the property, such as pets, gates or gate codes, parking, unit/building instructions, or other access concerns."
     };
   }
 
@@ -2204,6 +2284,7 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
     customerPhone,
     details: args.summary,
     language,
+    propertyAccess,
     scheduledFor: requestedDay,
     serviceType: serviceType || args.service_type || "service"
   });
@@ -2215,7 +2296,7 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
     .from("jobs")
     .insert({
       address: storageAddress || customer.address || null,
-      ai_notes: args.summary || null,
+      ai_notes: jobAiNotes({ details: args.summary, propertyAccess }),
       business_id: businessId,
       customer_id: customer.id,
       estimated_value: 0,
@@ -2264,6 +2345,7 @@ async function recordCallSummary({ args, businessId, callerPhone, callSessionId 
       customerName: customer.full_name,
       customerPhone,
       language,
+      propertyAccess,
       requestedFor: requestedDay,
       serviceType: serviceType || args.service_type || "service",
       status: "lead"
@@ -2534,11 +2616,29 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
             enum: CUSTOMER_SOURCE_OPTIONS
           },
           notes: { type: "string" },
+          property_access_confirmed: {
+            type: "boolean",
+            description:
+              "True only after Ana asks whether the crew should know anything about accessing the property. Set true when the caller gives details, says there are none, or declines."
+          },
+          property_access_notes: {
+            type: "string",
+            description:
+              "Owner-facing property access details shared by the caller, such as pets, gates or gate codes, parking, unit/building instructions, locked areas, or other arrival concerns. Use 'None reported' only after asking and the caller says there are none. Use 'Caller declined' if they decline."
+          },
           scheduled_date: { type: "string", description: "Local date in YYYY-MM-DD format." },
           scheduled_time: { type: "string", description: "Local 24-hour time in HH:mm format." },
           service_type: { type: "string", enum: serviceOptions }
         },
-        required: ["address_confirmed", "customer_name", "scheduled_date", "scheduled_time", "service_type"]
+        required: [
+          "address_confirmed",
+          "customer_name",
+          "property_access_confirmed",
+          "property_access_notes",
+          "scheduled_date",
+          "scheduled_time",
+          "service_type"
+        ]
       }
     },
     {
@@ -2589,6 +2689,16 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
             type: "string",
             description: "Time of day the caller wants, if they mentioned one but did not book a confirmed slot."
           },
+          property_access_confirmed: {
+            type: "boolean",
+            description:
+              "True only after Ana asks whether the crew should know anything about accessing the property. Set true when the caller gives details, says there are none, or declines."
+          },
+          property_access_notes: {
+            type: "string",
+            description:
+              "Owner-facing property access details shared by the caller, such as pets, gates or gate codes, parking, unit/building instructions, locked areas, or other arrival concerns. Use 'None reported' only after asking and the caller says there are none. Use 'Caller declined' if they decline."
+          },
           service_type: { type: "string" },
           summary: {
             type: "string",
@@ -2596,7 +2706,7 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
               "Professional owner-facing summary using only facts the caller shared. Do not invent names, addresses, dates, prices, or service details."
           }
         },
-        required: ["customer_name", "summary"]
+        required: ["customer_name", "property_access_confirmed", "property_access_notes", "summary"]
       }
     },
     {
@@ -2664,10 +2774,12 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
     "If the caller asks for a listed service, acknowledge it naturally and ask for the next practical detail, usually the service address or preferred day and time.",
     "If the caller asks for a service not listed, say you can take their details and have someone follow up, but do not book it as a confirmed appointment.",
     "Collect name, phone number if needed, service type, confirmed address, and preferred appointment time one or two details at a time.",
+    "After the basic service, address, and scheduling details are collected, but before saving the booking request or lead, ask one natural final property-access question. Example: 'Before I send this over, is there anything the crew should know about getting onto the property, like pets, a gate or gate code, parking, unit or building instructions, or anything else?' Do not ask this near the start of the call.",
+    "Save the caller's answer in property_access_notes exactly enough for the owner to act on it. If the caller says there is nothing else, use 'None reported'. If they decline, use 'Caller declined'. Never invent access details or set property_access_confirmed true before asking.",
     "Always call list_available_slots before offering times unless the caller asks for a specific time. Never book over an existing calendar event.",
-    "Only call book_appointment after the caller clearly agrees to a specific available date and time and the address has been confirmed during this call. Set address_confirmed true only after that verbal confirmation. This creates an owner approval request, not a final confirmed booking.",
+    "Only call book_appointment after the caller clearly agrees to a specific available date and time, the address has been confirmed, and the property-access question has been answered or declined during this call. Set address_confirmed and property_access_confirmed true only after those verbal confirmations. This creates an owner approval request, not a final confirmed booking.",
     "After saving a booking request or lead details, ask the caller if there is anything else you can help with.",
-    `If the call is business-related but does not result in a booking, silently call record_call_summary before ending the call. Include the customer name, confirmed address when available, service/work requested, and preferred day/time if the caller mentioned one. Write the tool summary in ${ownerSummaryLanguage(business.owner_summary_language) === "es" ? "Spanish" : "English"}.`,
+    `If the call is business-related but does not result in a booking, ask the property-access question after the basic lead details, then silently call record_call_summary before ending the call. Include the customer name, confirmed address when available, service/work requested, preferred day/time if mentioned, and property access notes. Write the tool summary in ${ownerSummaryLanguage(business.owner_summary_language) === "es" ? "Spanish" : "English"}.`,
     "When the caller says no, thanks, thank you, goodbye, that's all, or otherwise clearly has nothing else, call end_call. After end_call, say a short goodbye like 'Okay, I am hanging up now. Have a good day.' and stop talking.",
     "If the caller is personal, a vendor, spam, not a customer, or asks for the owner/human, call transfer_to_owner.",
     "If the caller wants a price quote for a listed service, collect details and offer to schedule a quote appointment inside business hours. Use estimated_value 0 when booking a quote appointment unless a known customer service fee applies.",

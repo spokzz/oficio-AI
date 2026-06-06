@@ -29,6 +29,7 @@ Implemented gateway:
 - Twilio Media Streams connect to `ws(s)://YOUR_GATEWAY/twilio/voice`.
 - The gateway bridges Twilio PCMU audio to OpenAI Realtime with `OPENAI_REALTIME_MODEL` defaulting to `gpt-realtime-mini`.
 - Ana can check open slots, book confirmed jobs in `jobs`, create/update phone customers, and transfer live calls to the owner through Twilio.
+- After collecting the basic service, confirmed address, and scheduling details, Ana asks one final property-access question covering pets, gates or gate codes, parking, unit/building instructions, and other arrival concerns. The response is saved in the job's AI notes and included in owner summaries.
 
 Required voice gateway environment:
 
@@ -60,7 +61,12 @@ Implemented owner confirmation routes:
 
 - `POST /api/twilio/sms` - receives owner YES/NO replies after Ana transfers a personal-screened caller.
 - `POST /api/twilio/sms` - logs owner-forwarded old-number customer texts when the owner sends `FWD +1CUSTOMERNUMBER` followed by the message body.
+- `POST /api/twilio/sms` - provides the bilingual SMS-only owner assistant for usage, bookings, calls, leads, reminders, customers, and confirmed record changes.
 - `POST /api/twilio/owner-confirmations/due` - cron/worker endpoint that sends due owner confirmation texts.
+
+The owner assistant authorizes only an `owner` membership whose saved `users.phone` exactly matches the normalized incoming SMS number. `businesses.owner_transfer_phone` alone does not grant data access. Every data query is scoped to the Twilio number's business. Updates, deletes, booking cancellations, and customer messages use an expiring confirmation stored in `owner_sms_pending_actions`; owner-assistant messages are recorded separately in `owner_sms_history`.
+
+This feature uses regular Twilio SMS only. WhatsApp senders and WhatsApp webhook behavior are not implemented.
 
 When an unknown caller says the call is not about business, Ana transfers the call to the owner and inserts an owner confirmation due two minutes later. Run the due endpoint every minute with `Authorization: Bearer $OFICIO_CRON_SECRET` in production.
 
@@ -78,8 +84,55 @@ Required SMS environment:
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_FROM_PHONE`
+- `OPENAI_API_KEY`
+- `OPENAI_OWNER_SMS_MODEL` optional, defaults to `OPENAI_TRANSLATION_MODEL` and then `gpt-5-nano`
 - `OFICIO_CRON_SECRET` for the due-confirmation worker in production
 - `TWILIO_WEBHOOK_BASE_URL` when Twilio signature validation needs a public URL different from the runtime request URL
+
+## Daily Owner Agenda
+
+`GET /api/customer-reminders/due` now performs two jobs:
+
+- Generates recurring customer reminders.
+- Sends each owner one bilingual SMS agenda when their business timezone reaches the configured morning hour.
+
+The agenda includes today's pending, confirmed, and in-progress bookings plus all due recurring reminders. It uses `businesses.owner_summary_language`, sends only to phone numbers saved on owner `users.phone` profiles, and records each delivery in `owner_daily_agenda_deliveries`. A unique business/owner/date constraint prevents duplicate morning texts.
+
+On Vercel Hobby, use:
+
+```bash
+OWNER_DAILY_AGENDA_DISPATCH_MODE=daily
+OWNER_DAILY_AGENDA_HOUR=5
+```
+
+The checked-in Hobby cron runs once daily at `10:00 UTC`. That is `5:00 AM` in Chicago during daylight-saving time and `4:00 AM` during standard time. All businesses are processed during that single invocation.
+
+After upgrading to Vercel Pro, change the cron schedule to `0 * * * *` and set:
+
+```bash
+OWNER_DAILY_AGENDA_DISPATCH_MODE=hourly
+OWNER_DAILY_AGENDA_HOUR=5
+```
+
+Hourly mode sends at 5:00 AM in each business's `booking_time_zone` and handles daylight-saving changes correctly.
+
+Set `OWNER_DASHBOARD_URL` separately in each environment:
+
+```bash
+OWNER_DASHBOARD_URL=https://staging.theoficio.com/owner
+```
+
+Use `https://theoficio.com/owner` in production. The link is always included at the bottom of normal/no-job agendas and in the overflow line when more than five jobs are scheduled.
+
+The SMS uses the owner summary language and follows these compact rules:
+
+- Show scheduled time, customer name, and service only.
+- Do not include addresses or notes in job lines.
+- Show at most five jobs ordered by scheduled time.
+- Count new leads created since the previous local agenda window.
+- Summarize at most three actionable attention items.
+
+Vercel Hobby allows cron jobs only once per day. Exact per-business local-time delivery requires Vercel Pro/Enterprise or an external hourly scheduler that calls the protected endpoint with `Authorization: Bearer $CRON_SECRET`. Vercel cron schedules always use UTC.
 
 Photo intake:
 
@@ -102,9 +155,12 @@ Do not integrate Stripe in v1.
 
 Track billing manually in the admin app:
 
-- Growth Monthly: `$149/month`
+- Basic: `$79/month`, `100` included AI minutes, with `$0.49/minute` overage beginning after `110` total minutes
+- Premium: `$149/month`, `300` included AI minutes, with `$0.39/minute` overage beginning after `320` total minutes
+- VIP: `$249/month`, `750` included AI minutes, with `$0.29/minute` overage beginning after `800` total minutes
+- Plan terms can be customized per business in Admin.
+- Each business chooses what happens when the overage threshold is reached: continue with overage, record voicemail, or forward to the owner.
 - Onboarding: `$199` one-time
-- Voice overage: `$0.60/min`
 - SMS overage: `$0.04/segment`
 - Payment status: trial, active, past due, canceled
 - Payment method note: Zelle, ACH, check, external card invoice, or QuickBooks
