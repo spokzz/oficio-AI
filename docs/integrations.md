@@ -10,9 +10,11 @@ Implemented webhook routes:
 
 - `POST /api/twilio/voice` - inbound voice routing and known-caller bypass.
 - `POST /api/twilio/voice/screen` - one-question unknown caller screening when the realtime gateway is not configured.
-- `POST /api/twilio/voice/status` - call completion updates and qualified business minute usage.
+- `POST /api/twilio/voice/status` - call completion updates and a fallback source for qualified business minute usage.
 
 Configure each Twilio number voice webhook to `POST /api/twilio/voice`. Configure Twilio call status callbacks to `POST /api/twilio/voice/status`.
+
+The Fly realtime gateway records qualified customer-call usage when a call closes. The Twilio status callback independently records the same source id, and the database unique index makes the operation idempotent. Migration `026_reliable_voice_usage.sql` backfills completed customer calls that were previously missing usage events.
 
 Each business should set:
 

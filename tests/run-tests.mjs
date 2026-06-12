@@ -292,6 +292,14 @@ assert.equal(
   true,
   "Voicemail and owner-forward calls should not be billed as AI receptionist minutes"
 );
+assert.equal(
+  twilioVoiceStatusSource.includes("timestampDuration") &&
+    twilioVoiceStatusSource.includes("Math.max(call.qualified_business_seconds, calculatedQualifiedSeconds)") &&
+    twilioVoiceStatusSource.includes('usageError.code !== "23505"'),
+  true,
+  "Voice status callbacks should recover missing duration and record usage idempotently"
+);
+assert.equal(Number((247 / 60).toFixed(4)), 4.1167, "A 4:07 qualified call should count as 4.1167 AI minutes");
 
 const phoneSource = fs.readFileSync(new URL("../lib/phone.ts", import.meta.url), "utf8");
 assert.equal(phoneSource.includes("phone?.trim()"), false, "Phone search values should not include unsanitized raw input in query builders");
@@ -375,6 +383,13 @@ assert.equal(
     !realtimeGatewaySource.includes('call.name === "end_call") {\n      state.finalized = true;'),
   true,
   "Completed customer calls should notify the owner through fallback lead processing when Ana did not save a summary"
+);
+assert.equal(
+  realtimeGatewaySource.includes("recordQualifiedVoiceUsage") &&
+    realtimeGatewaySource.includes('source: "realtime_gateway"') &&
+    realtimeGatewaySource.includes("Could not reload finalized call for usage"),
+  true,
+  "Fly realtime cleanup should record qualified AI minutes without depending on the Twilio status callback"
 );
 assert.equal(
   realtimeGatewaySource.includes("ownerPhone: normalizePhone(owner?.phone) || normalizePhone(business.owner_transfer_phone)") &&
@@ -475,6 +490,13 @@ for (const response of ["yes_approve", "alt_reschedule", "call_callback", "no_de
 for (const column of ["customer_alt_body", "customer_call_body", "customer_decline_body", "customer_language"]) {
   assert.equal(migrationSql.includes(column), true, `Booking confirmations should store ${column}`);
 }
+assert.equal(
+  migrationSql.includes("usage_events_event_type_source_id_idx") &&
+    migrationSql.includes("'backfilled', true") &&
+    migrationSql.includes("call.qualified_business_seconds::numeric / 60"),
+  true,
+  "Usage migrations should dedupe and backfill completed qualified calls"
+);
 for (const table of [
   "businesses",
   "business_users",

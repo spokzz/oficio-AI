@@ -2482,6 +2482,43 @@ async function updateCallOutcome({ businessId, callSessionId, outcome, status = 
     .eq("id", callSessionId);
 }
 
+async function recordQualifiedVoiceUsage({ call, endedAt, supabase }) {
+  if (!call || call.contact_type !== "customer" || call.screening_result?.startsWith("monthly_limit_")) return 0;
+
+  const startedAt = new Date(call.started_at);
+  const end = new Date(endedAt);
+  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(end.getTime())) return 0;
+
+  const qualifiedSeconds = Math.max(
+    Number(call.qualified_business_seconds ?? 0),
+    Math.max(0, Math.round((end.getTime() - startedAt.getTime()) / 1000))
+  );
+  if (!qualifiedSeconds) return 0;
+
+  const { error: callUpdateError } = await supabase
+    .from("call_sessions")
+    .update({ qualified_business_seconds: qualifiedSeconds })
+    .eq("id", call.id);
+  if (callUpdateError) throw new Error(callUpdateError.message);
+
+  const { error: usageError } = await supabase.from("usage_events").insert({
+    business_id: call.business_id,
+    event_type: "qualified_business_voice",
+    metadata: {
+      provider_call_id: call.provider_call_id || null,
+      qualified_seconds: qualifiedSeconds,
+      source: "realtime_gateway"
+    },
+    occurred_at: endedAt,
+    quantity: qualifiedSeconds / 60,
+    source_id: call.id,
+    unit: "minute"
+  });
+  if (usageError && usageError.code !== "23505") throw new Error(usageError.message);
+
+  return qualifiedSeconds;
+}
+
 async function finishRealtimeCall({
   allowFallbackLead = true,
   businessId,
@@ -2495,7 +2532,7 @@ async function finishRealtimeCall({
   const { supabase } = await getBusinessContext(businessId);
   const { data: existing, error } = await supabase
     .from("call_sessions")
-    .select("id,status,outcome,transcript,extracted_data")
+    .select("id,business_id,provider_call_id,contact_type,screening_result,qualified_business_seconds,started_at,status,outcome,transcript,extracted_data")
     .eq("id", callSessionId)
     .maybeSingle();
 
@@ -2504,8 +2541,9 @@ async function finishRealtimeCall({
     return;
   }
 
+  const endedAt = new Date().toISOString();
   const values = {
-    ended_at: new Date().toISOString(),
+    ended_at: endedAt,
     extracted_data: extractedData && Object.keys(extractedData).length ? extractedData : existing.extracted_data || {},
     transcript: transcript || existing.transcript || null
   };
@@ -2529,6 +2567,19 @@ async function finishRealtimeCall({
         return null;
       })
     : null;
+
+  const { data: finalizedCall, error: finalizedCallError } = await supabase
+    .from("call_sessions")
+    .select("id,business_id,provider_call_id,contact_type,screening_result,qualified_business_seconds,started_at")
+    .eq("id", callSessionId)
+    .maybeSingle();
+  if (finalizedCallError) {
+    console.error("Could not reload finalized call for usage:", finalizedCallError.message);
+  } else {
+    await recordQualifiedVoiceUsage({ call: finalizedCall, endedAt, supabase }).catch((usageError) => {
+      console.error("Could not record realtime voice usage:", usageError.message);
+    });
+  }
 
   await ensureCallArtifacts({
     businessId,

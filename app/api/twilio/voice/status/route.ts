@@ -26,23 +26,38 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   const { data: call } = await supabase
     .from("call_sessions")
-    .select("id,business_id,contact_type,qualified_business_seconds,screening_result")
+    .select("id,business_id,contact_type,qualified_business_seconds,screening_result,started_at,ended_at")
     .eq("provider_call_id", providerCallId)
-    .maybeSingle<{ id: string; business_id: string; contact_type: string; qualified_business_seconds: number; screening_result: string | null }>();
+    .maybeSingle<{
+      id: string;
+      business_id: string;
+      contact_type: string;
+      qualified_business_seconds: number;
+      screening_result: string | null;
+      started_at: string;
+      ended_at: string | null;
+    }>();
 
   if (!call) {
     return NextResponse.json({ ok: true, skipped: "unknown_call" });
   }
 
-  const duration = Number(params.CallDuration ?? params.Duration ?? 0);
+  const callbackTime = new Date();
+  const explicitDuration = Number(params.CallDuration ?? params.Duration ?? 0);
+  const startedAt = new Date(call.started_at);
+  const endedAt = call.ended_at ? new Date(call.ended_at) : callbackTime;
+  const timestampDuration =
+    Number.isNaN(startedAt.getTime()) || Number.isNaN(endedAt.getTime()) ? 0 : Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000));
+  const duration = Number.isFinite(explicitDuration) && explicitDuration > 0 ? Math.round(explicitDuration) : timestampDuration;
   const usedAiReceptionist = !call.screening_result?.startsWith("monthly_limit_");
-  const qualifiedSeconds =
+  const calculatedQualifiedSeconds =
     call.contact_type === "customer" && usedAiReceptionist && Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 0;
+  const qualifiedSeconds = Math.max(call.qualified_business_seconds, calculatedQualifiedSeconds);
 
   const { error: updateError } = await supabase
     .from("call_sessions")
     .update({
-      ended_at: new Date().toISOString(),
+      ended_at: call.ended_at ?? callbackTime.toISOString(),
       qualified_business_seconds: qualifiedSeconds,
       status: callStatus(params.CallStatus)
     })
@@ -52,7 +67,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
-  if (qualifiedSeconds > 0 && call.qualified_business_seconds === 0) {
+  if (qualifiedSeconds > 0) {
     const { error: usageError } = await supabase.from("usage_events").insert({
       business_id: call.business_id,
       event_type: "qualified_business_voice",
@@ -65,7 +80,7 @@ export async function POST(request: Request) {
       }
     });
 
-    if (usageError) {
+    if (usageError && usageError.code !== "23505") {
       return NextResponse.json({ error: usageError.message }, { status: 500 });
     }
   }
