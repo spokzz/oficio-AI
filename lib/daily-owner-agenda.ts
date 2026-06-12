@@ -37,6 +37,17 @@ type AgendaReminder = {
   service_type: string | null;
 };
 
+type AgendaLead = {
+  address: string | null;
+  ai_notes: string | null;
+  customers:
+    | { full_name: string | null; phone: string | null }
+    | Array<{ full_name: string | null; phone: string | null }>
+    | null;
+  service_type: string | null;
+  status: string;
+};
+
 type AgendaAttention = {
   callbackCount: number;
   missingAddressNames: string[];
@@ -46,12 +57,13 @@ type AgendaAttention = {
   pendingBookingCount: number;
   pendingQuoteCount: number;
   recurringReminderCount: number;
+  rescheduleCount: number;
 };
 
 type AgendaData = {
   attention: AgendaAttention;
   jobs: AgendaJob[];
-  newLeadCount: number;
+  newLeads: AgendaLead[];
 };
 
 function configuredAgendaHour() {
@@ -220,6 +232,14 @@ function attentionItems(attention: AgendaAttention, language: Language) {
     );
   }
 
+  if (attention.rescheduleCount) {
+    items.push(
+      language === "es"
+        ? countLine(attention.rescheduleCount, "cliente necesita otro horario", "clientes necesitan otro horario")
+        : countLine(attention.rescheduleCount, "customer needs another time", "customers need another time")
+    );
+  }
+
   if (attention.missingPhotoQuoteCount) {
     items.push(
       language === "es"
@@ -260,14 +280,14 @@ function agendaBody({
   dateKey,
   jobs,
   language,
-  newLeadCount,
+  newLeads,
   timeZone
 }: {
   attention: AgendaAttention;
   dateKey: string;
   jobs: AgendaJob[];
   language: Language;
-  newLeadCount: number;
+  newLeads: AgendaLead[];
   timeZone: string;
 }) {
   const link = dashboardLink();
@@ -279,12 +299,18 @@ function agendaBody({
   const lines: string[] = [];
 
   if (!jobs.length) {
-    lines.push(language === "es" ? "Buenos días — no hay trabajos programados para hoy." : "Good morning — no jobs are scheduled for today.");
+    lines.push(
+      language === "es"
+        ? `Buenos días. Resumen diario para ${displayDate(dateKey, language)}.`
+        : `Good morning. Daily summary for ${displayDate(dateKey, language)}.`
+    );
+    lines.push("");
+    lines.push(language === "es" ? "Trabajos de hoy: ninguno programado." : "Today’s jobs: none scheduled.");
   } else {
     lines.push(
       language === "es"
-        ? `Buenos días — este es tu horario para hoy, ${displayDate(dateKey, language)}.`
-        : `Good morning — here’s your schedule for today, ${displayDate(dateKey, language)}.`
+        ? `Buenos días. Resumen diario para ${displayDate(dateKey, language)}.`
+        : `Good morning. Daily summary for ${displayDate(dateKey, language)}.`
     );
     lines.push("");
     lines.push(language === "es" ? `Trabajos hoy: ${jobs.length}` : `Jobs today: ${jobs.length}`);
@@ -305,7 +331,6 @@ function agendaBody({
         ? `${jobs.length - 5} trabajos más en el panel: ${link}`
         : `${jobs.length - 5} more jobs in dashboard: ${link}`
     );
-    return compact(lines.join("\n"), 1450);
   }
 
   lines.push("");
@@ -313,9 +338,50 @@ function agendaBody({
   lines.push("");
   lines.push(...(items.length ? items : [language === "es" ? "Nada urgente" : "Nothing urgent"]));
   lines.push("");
-  lines.push(language === "es" ? `Nuevos clientes potenciales: ${newLeadCount}` : `New leads: ${newLeadCount}`);
+  lines.push(language === "es" ? `Nuevos clientes potenciales: ${newLeads.length}` : `New leads: ${newLeads.length}`);
+  if (newLeads.length) {
+    lines.push("");
+    for (const lead of newLeads.slice(0, 3)) {
+      const customer = relationOne(lead.customers);
+      const savedName = compact(customer?.full_name, 40);
+      const name =
+        savedName && !/^(phone caller|caller|unknown|customer|cliente)$/i.test(savedName)
+          ? savedName
+          : language === "es"
+            ? "Nombre no recopilado"
+            : "Name not collected";
+      const phone = normalizePhone(customer?.phone) || (language === "es" ? "teléfono no recopilado" : "phone not collected");
+      const detail = compact(lead.ai_notes, 110);
+      const action =
+        lead.status === "needs_callback"
+          ? language === "es"
+            ? "necesita llamada"
+            : "needs callback"
+          : lead.status === "needs_reschedule"
+            ? language === "es"
+              ? "necesita otro horario"
+              : "needs another time"
+            : lead.status === "lead_not_confirmed"
+              ? language === "es"
+                ? "cita no confirmada"
+                : "appointment not confirmed"
+              : null;
+      lines.push(`• ${name} — ${serviceLabel(lead.service_type, language)}${action ? ` (${action})` : ""}`);
+      lines.push(`  ${phone}${lead.address ? ` | ${compact(lead.address, 70)}` : ""}`);
+      if (detail) lines.push(language === "es" ? `  Detalles: ${detail}` : `  Details: ${detail}`);
+    }
+    if (newLeads.length > 3) {
+      lines.push(
+        language === "es"
+          ? `+${newLeads.length - 3} clientes potenciales más en el panel`
+          : `+${newLeads.length - 3} more leads in the dashboard`
+      );
+    }
+  } else {
+    lines.push(language === "es" ? "No se recibieron clientes potenciales nuevos." : "No new leads were received.");
+  }
   lines.push("");
-  lines.push(language === "es" ? `Abrir panel: ${link}` : `Open dashboard: ${link}`);
+  lines.push(language === "es" ? `Panel del propietario: ${link}` : `Owner dashboard: ${link}`);
   return compact(lines.join("\n"), 1450);
 }
 
@@ -362,7 +428,7 @@ async function businessAgenda(businessId: string, dateKey: string, timeZone: str
       .from("jobs")
       .select("scheduled_start,service_type,status,address,customers(full_name,phone,address)")
       .eq("business_id", businessId)
-      .in("status", ["pending", "confirmed", "in_progress"])
+      .in("status", ["pending", "pending_owner_approval", "confirmed", "in_progress"])
       .gte("scheduled_start", broadStart)
       .lt("scheduled_start", broadEnd)
       .order("scheduled_start", { ascending: true })
@@ -377,11 +443,12 @@ async function businessAgenda(businessId: string, dateKey: string, timeZone: str
       .limit(100),
     supabase
       .from("jobs")
-      .select("id")
+      .select("address,ai_notes,service_type,status,customers(full_name,phone)")
       .eq("business_id", businessId)
-      .eq("status", "lead")
+      .in("status", ["lead", "needs_reschedule", "needs_callback", "lead_not_confirmed"])
       .gte("created_at", leadWindowStart)
       .lt("created_at", leadWindowEnd)
+      .order("created_at", { ascending: false })
       .limit(500),
     supabase
       .from("owner_booking_confirmations")
@@ -423,17 +490,18 @@ async function businessAgenda(businessId: string, dateKey: string, timeZone: str
 
   return {
     attention: {
-      callbackCount: callbackRows?.length ?? 0,
+      callbackCount: (callbackRows?.length ?? 0) + (leadRows ?? []).filter((lead) => lead.status === "needs_callback").length,
       missingAddressNames,
       missingPhoneNames,
       missingPhotoQuoteCount: (quoteRows ?? []).filter((quote) => !quote.photo_urls?.length).length,
       pendingApprovalCount: approvalRows?.length ?? 0,
-      pendingBookingCount: jobs.filter((job) => job.status === "pending").length,
+      pendingBookingCount: jobs.filter((job) => ["pending", "pending_owner_approval"].includes(job.status)).length,
       pendingQuoteCount: quoteRows?.length ?? 0,
-      recurringReminderCount: ((reminderRows ?? []) as unknown as AgendaReminder[]).length
+      recurringReminderCount: ((reminderRows ?? []) as unknown as AgendaReminder[]).length,
+      rescheduleCount: (leadRows ?? []).filter((lead) => lead.status === "needs_reschedule").length
     },
     jobs,
-    newLeadCount: leadRows?.length ?? 0
+    newLeads: (leadRows ?? []) as unknown as AgendaLead[]
   };
 }
 
@@ -497,7 +565,7 @@ export async function sendDueOwnerDailyAgendas(referenceDate = new Date()) {
     result.businessesChecked += 1;
 
     const language = languageFrom(business.owner_summary_language);
-    const [{ attention, jobs, newLeadCount }, owners] = await Promise.all([
+    const [{ attention, jobs, newLeads }, owners] = await Promise.all([
       businessAgenda(business.id, local.dateKey, timeZone, referenceDate),
       businessOwners(business.id)
     ]);
@@ -506,7 +574,7 @@ export async function sendDueOwnerDailyAgendas(referenceDate = new Date()) {
       dateKey: local.dateKey,
       jobs,
       language,
-      newLeadCount,
+      newLeads,
       timeZone
     });
 
@@ -562,7 +630,7 @@ export async function sendDueOwnerDailyAgendas(referenceDate = new Date()) {
           after: {
             agenda_date: local.dateKey,
             booking_count: jobs.length,
-            new_lead_count: newLeadCount,
+            new_lead_count: newLeads.length,
             to_phone: ownerPhone
           },
           businessId: business.id,

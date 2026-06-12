@@ -337,9 +337,9 @@ assert.equal(dailyOwnerAgendaSource.includes("normalizePhone(owner.phone)"), tru
 assert.equal(dailyOwnerAgendaSource.includes("owner_summary_language"), true, "Daily agenda should use the saved owner summary language");
 assert.equal(dailyOwnerAgendaSource.includes("owner_daily_agenda_deliveries"), true, "Daily agenda delivery should be durably deduplicated");
 assert.equal(
-  dailyOwnerAgendaSource.includes("Good morning — here’s your schedule for today") &&
-    dailyOwnerAgendaSource.includes("Buenos días — este es tu horario para hoy") &&
-    dailyOwnerAgendaSource.includes("Good morning — no jobs are scheduled for today"),
+  dailyOwnerAgendaSource.includes("Good morning. Daily summary for") &&
+    dailyOwnerAgendaSource.includes("Buenos días. Resumen diario para") &&
+    dailyOwnerAgendaSource.includes("Today’s jobs: none scheduled."),
   true,
   "Daily agenda should have normal and no-job English/Spanish templates"
 );
@@ -347,6 +347,13 @@ assert.equal(dailyOwnerAgendaSource.includes("Showing first 5:") && dailyOwnerAg
 assert.equal(dailyOwnerAgendaSource.includes("OWNER_DASHBOARD_URL"), true, "Daily agenda should always include the environment-specific owner dashboard link");
 assert.equal(dailyOwnerAgendaSource.includes("leadWindowStart") && dailyOwnerAgendaSource.includes("leadWindowEnd"), true, "New leads should use the previous local agenda window");
 assert.equal(dailyOwnerAgendaSource.includes("missingAddressNames") && dailyOwnerAgendaSource.includes("pendingApprovalCount"), true, "Daily agenda should summarize actionable attention items");
+assert.equal(
+  dailyOwnerAgendaSource.includes("customers(full_name,phone)") &&
+    dailyOwnerAgendaSource.includes("newLeads.slice(0, 3)") &&
+    dailyOwnerAgendaSource.includes("Details:"),
+  true,
+  "Daily agenda should include useful details for each recent lead instead of only a count"
+);
 
 const realtimeGatewaySource = fs.readFileSync(new URL("../scripts/voice-realtime-server.mjs", import.meta.url), "utf8");
 assert.equal(realtimeGatewaySource.includes("IDLE_NO_AUDIO_TIMEOUT_MS = Number(process.env.OFICIO_IDLE_NO_AUDIO_TIMEOUT_MS || 15 * 1000)"), true, "Realtime gateway should default no-audio timeout to 15 seconds");
@@ -362,6 +369,43 @@ assert.equal(realtimeGatewaySource.includes("assertProviderEnvironmentSafety"), 
 assert.equal(realtimeGatewaySource.includes("assertNoProtectedSecrets(instructions"), true, "Realtime gateway should check Ana instructions for protected secrets");
 assert.equal(realtimeGatewaySource.includes("businessSmsSender"), true, "Realtime gateway SMS should prefer per-business Twilio sender configuration");
 assert.equal(realtimeGatewaySource.includes("messaging_service_sid"), true, "Realtime gateway should load per-business Messaging Service SID");
+assert.equal(
+  realtimeGatewaySource.includes("Could not notify owner about fallback lead") &&
+    realtimeGatewaySource.includes("return { ok: Boolean(sms.ok), sms }") &&
+    !realtimeGatewaySource.includes('call.name === "end_call") {\n      state.finalized = true;'),
+  true,
+  "Completed customer calls should notify the owner through fallback lead processing when Ana did not save a summary"
+);
+assert.equal(
+  realtimeGatewaySource.includes("ownerPhone: normalizePhone(owner?.phone) || normalizePhone(business.owner_transfer_phone)") &&
+    realtimeGatewaySource.includes("ownerTransferPhone: normalizePhone(business.owner_transfer_phone) || normalizePhone(owner?.phone)"),
+  true,
+  "Owner summaries should use the profile phone while live call transfers use the configured transfer phone"
+);
+assert.equal(
+  realtimeGatewaySource.includes("YES = confirm + text customer") &&
+    realtimeGatewaySource.includes("ALT = ask customer for another time") &&
+    realtimeGatewaySource.includes("CALL = tell customer owner will call") &&
+    realtimeGatewaySource.includes("NO = keep as lead, not confirmed"),
+  true,
+  "Owner booking approval SMS should present all four customer-safe response options"
+);
+assert.equal(
+  realtimeGatewaySource.includes("That time is not available anymore, but we can still help.") &&
+    realtimeGatewaySource.includes("The owner will call you back to confirm the best time") &&
+    realtimeGatewaySource.includes("that appointment time is not confirmed") &&
+    realtimeGatewaySource.includes("Ese horario ya no está disponible") &&
+    realtimeGatewaySource.includes("El dueño le llamará"),
+  true,
+  "Booking workflow should generate bilingual customer messages for ALT, CALL, and NO"
+);
+assert.equal(
+  realtimeGatewaySource.includes('"customer_language"') &&
+    realtimeGatewaySource.includes('status: "pending_owner_approval"') &&
+    realtimeGatewaySource.includes("This is not confirmed yet"),
+  true,
+  "Ana should preserve the caller language and set expectations before owner approval"
+);
 assert.equal(
   realtimeGatewaySource.includes("property_access_confirmed") &&
     realtimeGatewaySource.includes("property_access_notes") &&
@@ -379,7 +423,28 @@ assert.equal(
 );
 
 const smsRouteSource = fs.readFileSync(new URL("../app/api/twilio/sms/route.ts", import.meta.url), "utf8");
-assert.equal(smsRouteSource.includes("validCustomerConfirmationSms"), true, "Customer confirmation SMS should be template-validated before sending");
+assert.equal(smsRouteSource.includes("validCustomerBookingResponseSms"), true, "Every customer booking-response SMS should be template-validated before sending");
+assert.equal(
+  smsRouteSource.includes('jobStatus: "confirmed"') &&
+    smsRouteSource.includes('jobStatus: "needs_reschedule"') &&
+    smsRouteSource.includes('jobStatus: "needs_callback"') &&
+    smsRouteSource.includes('jobStatus: "lead_not_confirmed"'),
+  true,
+  "Owner YES, ALT, CALL, and NO replies should map to explicit booking workflow states"
+);
+assert.equal(
+  smsRouteSource.includes("Ana asked the customer for another day or time.") &&
+    smsRouteSource.includes("Ana told the customer you will call") &&
+    smsRouteSource.includes("sent the customer a polite update"),
+  true,
+  "Every non-confirmation owner response should still notify the customer"
+);
+assert.equal(
+  smsRouteSource.includes("fallbackCustomerBookingResponse") &&
+    smsRouteSource.includes("confirmation.customer_language || callSession?.detected_language || customer?.preferred_language"),
+  true,
+  "Older pending booking requests should receive bilingual fallback customer messages"
+);
 
 const migrationsDirectory = new URL("../supabase/migrations/", import.meta.url);
 const migrationSql = fs
@@ -401,6 +466,15 @@ assert.equal(migrationSql.includes('create policy "members create owner sms hist
 assert.equal(migrationSql.includes("create table if not exists public.owner_daily_agenda_deliveries"), true, "Daily owner agendas should have a delivery ledger");
 assert.equal(migrationSql.includes("unique (business_id, owner_user_id, agenda_date)"), true, "Daily owner agenda delivery should be unique per owner and local date");
 assert.equal(migrationSql.includes('create policy "members manage owner daily agenda deliveries"'), false, "Authenticated browser clients should not forge daily agenda deliveries");
+for (const status of ["pending_owner_approval", "needs_reschedule", "needs_callback", "lead_not_confirmed"]) {
+  assert.equal(migrationSql.includes(`'${status}'`), true, `Booking response workflow should add the ${status} job status`);
+}
+for (const response of ["yes_approve", "alt_reschedule", "call_callback", "no_decline"]) {
+  assert.equal(migrationSql.includes(`'${response}'`), true, `Booking confirmations should accept the ${response} owner response`);
+}
+for (const column of ["customer_alt_body", "customer_call_body", "customer_decline_body", "customer_language"]) {
+  assert.equal(migrationSql.includes(column), true, `Booking confirmations should store ${column}`);
+}
 for (const table of [
   "businesses",
   "business_users",
@@ -448,7 +522,9 @@ for (const action of [
   "owner_settings_updated",
   "admin_twilio_numbers_updated",
   "booking_approved",
-  "booking_declined",
+  "booking_reschedule_requested",
+  "booking_callback_requested",
+  "booking_not_confirmed",
   "job_status_changed",
   "summary_language_changed",
   "customer_deleted",

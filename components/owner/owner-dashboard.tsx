@@ -279,6 +279,8 @@ const copy = {
       incomplete: "Incompleta",
       needs_approval: "Necesita aprobación",
       needs_callback: "Necesita llamada",
+      needs_reschedule: "Necesita otro horario",
+      not_confirmed: "Cita no confirmada",
       new_lead: "Cliente potencial"
     },
     noCalls: "No hay llamadas con Ana todavía.",
@@ -336,8 +338,12 @@ const copy = {
       expired: "Vencida",
       in_progress: "En progreso",
       lead: "Cliente potencial",
+      lead_not_confirmed: "Cita no confirmada",
+      needs_callback: "Necesita llamada",
       needs_owner_approval: "Necesita aprobación",
+      needs_reschedule: "Necesita otro horario",
       pending: "Pendiente",
+      pending_owner_approval: "Pendiente de aprobación",
       sent: "Enviada"
     },
     services: {
@@ -563,6 +569,8 @@ const copy = {
       incomplete: "Incomplete",
       needs_approval: "Needs approval",
       needs_callback: "Needs callback",
+      needs_reschedule: "Needs another time",
+      not_confirmed: "Appointment not confirmed",
       new_lead: "New lead"
     },
     noCalls: "No Ana calls yet.",
@@ -620,8 +628,12 @@ const copy = {
       expired: "Expired",
       in_progress: "In progress",
       lead: "Lead",
+      lead_not_confirmed: "Appointment not confirmed",
+      needs_callback: "Needs callback",
       needs_owner_approval: "Needs approval",
+      needs_reschedule: "Needs another time",
       pending: "Pending",
+      pending_owner_approval: "Pending owner approval",
       sent: "Sent"
     },
     services: {
@@ -799,7 +811,10 @@ function callCallerName(call: OwnerPortalData["calls"][number], labels: OwnerCop
 function callBusinessStatus(call: OwnerPortalData["calls"][number], labels: OwnerCopy) {
   const statuses: Record<string, string> = labels.callStatuses;
   if (call.jobs?.status === "confirmed") return statuses.booked;
-  if (call.needs_owner_review || call.jobs?.status === "pending") return statuses.needs_approval;
+  if (call.needs_owner_review || ["pending", "pending_owner_approval"].includes(call.jobs?.status ?? "")) return statuses.needs_approval;
+  if (call.jobs?.status === "needs_reschedule") return statuses.needs_reschedule;
+  if (call.jobs?.status === "needs_callback") return statuses.needs_callback;
+  if (call.jobs?.status === "lead_not_confirmed") return statuses.not_confirmed;
   if (call.jobs?.status === "lead") return statuses.new_lead;
   if (call.status === "transferred") return statuses.needs_callback;
   if (!call.customer_id && !call.job_id) return statuses.incomplete;
@@ -810,6 +825,8 @@ function callBusinessStatus(call: OwnerPortalData["calls"][number], labels: Owne
 function callOwnerAction(call: OwnerPortalData["calls"][number], labels: OwnerCopy) {
   const status = callBusinessStatus(call, labels);
   if (status === labels.callStatuses.needs_approval) return labels.callStatuses.needs_approval;
+  if (status === labels.callStatuses.needs_reschedule) return labels.callStatuses.needs_reschedule;
+  if (status === labels.callStatuses.not_confirmed) return labels.review;
   if (status === labels.callStatuses.new_lead) return labels.review;
   if (status === labels.callStatuses.incomplete || status === labels.callStatuses.needs_callback) return labels.callStatuses.needs_callback;
   return labels.notCollected;
@@ -1078,12 +1095,18 @@ export function OwnerDashboard({
     [data.quotes]
   );
   const scheduledBookings = useMemo(
-    () => data.jobs.filter((job) => job.scheduled_start && job.status !== "canceled" && job.status !== "lead" && job.status !== "pending"),
+    () => data.jobs.filter((job) => job.scheduled_start && ["confirmed", "in_progress", "completed"].includes(job.status)),
     [data.jobs]
   );
   const currentBookings = useMemo(() => scheduledBookings.filter((job) => !isPastBooking(job)).sort((a, b) => scheduledTime(a) - scheduledTime(b)), [scheduledBookings]);
   const pastBookings = useMemo(() => scheduledBookings.filter(isPastBooking).sort((a, b) => scheduledTime(b) - scheduledTime(a)), [scheduledBookings]);
-  const leadBookings = useMemo(() => data.jobs.filter((job) => job.status === "lead").sort((a, b) => createdTime(b) - createdTime(a)), [data.jobs]);
+  const leadBookings = useMemo(
+    () =>
+      data.jobs
+        .filter((job) => ["lead", "pending", "pending_owner_approval", "needs_reschedule", "needs_callback", "lead_not_confirmed"].includes(job.status))
+        .sort((a, b) => createdTime(b) - createdTime(a)),
+    [data.jobs]
+  );
   const todayJobs = useMemo(() => scheduledBookings.filter(isTodayJob), [scheduledBookings]);
   const callActivity = useMemo(() => monthlyCallActivity(data.calls, language, selectedCallWeekStart), [data.calls, language, selectedCallWeekStart]);
   const maxCallCount = Math.max(...callActivity.map((day) => day.count), 1);
@@ -2988,7 +3011,7 @@ function EditBookingModal({
   const [state, formAction] = useActionState(updateOwnerBooking, initialState);
   const selectedCustomer = customers.some((customer) => customer.id === booking.customer_id) ? (booking.customer_id ?? "") : "";
   const selectedService = serviceOptions.includes(booking.service_type as ServiceOption) ? (booking.service_type as ServiceOption) : "landscaping";
-  const initialBookingStatus = booking.status === "lead" ? "lead" : "confirmed";
+  const initialBookingStatus = booking.status === "confirmed" ? "confirmed" : "lead";
   const [bookingStatus, setBookingStatus] = useState(initialBookingStatus);
 
   useEffect(() => {

@@ -318,7 +318,7 @@ export async function getOwnerPortalData(displayLanguage: OwnerDisplayLanguage =
   }));
 
   const { start, end } = todayRange();
-  const scheduledJobs = jobs.filter((job) => job.scheduled_start && job.status !== "canceled");
+  const scheduledJobs = jobs.filter((job) => job.scheduled_start && ["confirmed", "in_progress", "completed"].includes(job.status));
   const todayScheduledJobs = scheduledJobs.filter((job) => job.scheduled_start && job.scheduled_start >= start && job.scheduled_start < end);
   const currentMonthCalls = calls.filter((call) => call.started_at >= monthStart.toISOString() && call.started_at < nextMonthStart.toISOString());
 

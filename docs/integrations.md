@@ -59,6 +59,7 @@ Incoming messages should hit a messaging webhook. Store the message, run the AI 
 
 Implemented owner confirmation routes:
 
+- `POST /api/twilio/sms` - receives owner `YES`, `ALT`, `CALL`, or `NO` replies for appointment requests.
 - `POST /api/twilio/sms` - receives owner YES/NO replies after Ana transfers a personal-screened caller.
 - `POST /api/twilio/sms` - logs owner-forwarded old-number customer texts when the owner sends `FWD +1CUSTOMERNUMBER` followed by the message body.
 - `POST /api/twilio/sms` - provides the bilingual SMS-only owner assistant for usage, bookings, calls, leads, reminders, customers, and confirmed record changes.
@@ -69,6 +70,15 @@ The owner assistant authorizes only an `owner` membership whose saved `users.pho
 This feature uses regular Twilio SMS only. WhatsApp senders and WhatsApp webhook behavior are not implemented.
 
 When an unknown caller says the call is not about business, Ana transfers the call to the owner and inserts an owner confirmation due two minutes later. Run the due endpoint every minute with `Authorization: Bearer $OFICIO_CRON_SECRET` in production.
+
+Appointment requests remain unconfirmed until the owner responds:
+
+- `YES` confirms the booking and texts the customer.
+- `ALT` marks the request as needing rescheduling and asks the customer for another day or time.
+- `CALL` marks the request as needing a callback and tells the customer the owner will call.
+- `NO` keeps the request as an unconfirmed lead and sends a polite customer update.
+
+New appointment requests use `pending_owner_approval`. The resulting job states are `confirmed`, `needs_reschedule`, `needs_callback`, or `lead_not_confirmed`.
 
 For existing businesses that cannot move SMS immediately, use SMS transition mode. The owner can manually forward a customer text from the old number to the Twilio number in this format:
 

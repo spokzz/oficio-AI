@@ -5,7 +5,17 @@ export type VoiceSetupStatus = "not_started" | "pending" | "active" | "blocked";
 export type SmsSetupStatus = "not_started" | "pending" | "active" | "transition" | "blocked";
 export type ExistingNumberKind = "unknown" | "business" | "personal" | "mixed";
 export type PortingStatus = "not_started" | "collecting_info" | "submitted" | "completed" | "blocked";
-export type JobStatus = "lead" | "pending" | "confirmed" | "in_progress" | "completed" | "canceled";
+export type JobStatus =
+  | "lead"
+  | "pending"
+  | "pending_owner_approval"
+  | "needs_reschedule"
+  | "needs_callback"
+  | "lead_not_confirmed"
+  | "confirmed"
+  | "in_progress"
+  | "completed"
+  | "canceled";
 export type QuoteStatus = "draft" | "needs_owner_approval" | "approved" | "sent" | "accepted" | "declined" | "expired";
 export type ContactClassification = "customer" | "personal" | "vendor" | "spam" | "unknown";
 export type OwnerSummaryChannel = "sms" | "email";

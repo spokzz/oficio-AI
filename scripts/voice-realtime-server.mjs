@@ -319,6 +319,7 @@ function missingToolFields(toolName, args) {
   const requiredFields = {
     book_appointment: [
       "address_confirmed",
+      "customer_language",
       "customer_name",
       "property_access_confirmed",
       "property_access_notes",
@@ -522,6 +523,14 @@ function dateKeyInZone(date, timeZone = DEFAULT_TIME_ZONE) {
 
 function spokenDateTime(date, timeZone = DEFAULT_TIME_ZONE) {
   return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "full",
+    timeStyle: "short",
+    timeZone
+  }).format(date);
+}
+
+function localizedDateTime(date, timeZone = DEFAULT_TIME_ZONE, language = "en") {
+  return new Intl.DateTimeFormat(language === "es" ? "es-US" : "en-US", {
     dateStyle: "full",
     timeStyle: "short",
     timeZone
@@ -990,16 +999,16 @@ async function notifyOwnerSummary({
       subject: prefix,
       to: ownerEmail
     });
-    return { ok: true, email };
+    return { ok: Boolean(email.ok), email };
   }
 
   if (!ownerPhone) {
-    return { ok: true, sms: { ok: false, skipped: "owner_phone_missing" } };
+    return { ok: false, sms: { ok: false, skipped: "owner_phone_missing" } };
   }
 
   const sms = await sendTwilioSms({ body, ...businessSmsSender(business), to: ownerPhone });
 
-  return { ok: true, sms };
+  return { ok: Boolean(sms.ok), sms };
 }
 
 function oppositeOwnerLanguage(language) {
@@ -1077,7 +1086,8 @@ async function getBusinessContext(businessId) {
     business,
     owner,
     ownerEmail: owner?.email || null,
-    ownerPhone: normalizePhone(business.owner_transfer_phone) || normalizePhone(owner?.phone),
+    ownerPhone: normalizePhone(owner?.phone) || normalizePhone(business.owner_transfer_phone),
+    ownerTransferPhone: normalizePhone(business.owner_transfer_phone) || normalizePhone(owner?.phone),
     radiusRule: radiusRule || null,
     supabase
   };
@@ -1263,10 +1273,10 @@ function shouldSkipFallbackLead(call) {
   return false;
 }
 
-async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fallbackOutcome, transcript }) {
+async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, transcript }) {
   if (!businessId || !callSessionId || !transcript) return null;
 
-  const { business, supabase } = await getBusinessContext(businessId);
+  const { business, ownerEmail, ownerPhone, supabase } = await getBusinessContext(businessId);
   const { data: call, error } = await supabase
     .from("call_sessions")
     .select("id,business_id,customer_id,job_id,contact_type,from_phone,status,detected_language")
@@ -1288,30 +1298,36 @@ async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fal
   const email = extractedEmail(callerText);
   const referralSource = extractedReferralSource(callerText);
   const hasLeadSignal = Boolean(serviceType || customerName || address || email);
+  const customerFullName = cleanCustomerFullName(customerName, call.from_phone);
 
   if (!hasLeadSignal) return null;
-  if (!cleanCustomerFullName(customerName, call.from_phone)) return null;
 
   const customer = await findOrCreateCustomer({
-    address: null,
+    address,
     businessId,
     email,
-    name: customerName,
+    name: customerFullName,
     phone: call.from_phone,
     referralSource,
     supabase
   });
   const language = ownerSummaryLanguage(business.owner_summary_language);
-  const service = serviceType ? serviceLabel(serviceType) : "service";
-  const summary =
-    language === "es"
-      ? `${customer.full_name} compartió detalles por teléfono sobre ${service}. ${fallbackTranscriptSummary(transcript, normalizePhone(call.from_phone), language, fallbackOutcome)}`
-      : `${customer.full_name} shared phone details about ${service}. ${fallbackTranscriptSummary(transcript, normalizePhone(call.from_phone), language, fallbackOutcome)}`;
+  const customerPhone = normalizePhone(call.from_phone);
+  const summary = friendlyLeadSummary({
+    address: address || customer.address || null,
+    customerName: customerFullName,
+    customerPhone,
+    details: callerText,
+    language,
+    propertyAccess: language === "es" ? "No recopilado" : "Not collected",
+    scheduledFor: null,
+    serviceType: serviceType || "service"
+  });
 
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .insert({
-      address: customer.address || null,
+      address: address || customer.address || null,
       ai_notes: compactCallText(callerText, 700),
       business_id: businessId,
       customer_id: customer.id,
@@ -1328,7 +1344,7 @@ async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fal
   await upsertCallerContact({
     businessId,
     customerId: customer.id,
-    displayName: customer.full_name,
+    displayName: customerFullName,
     phone: call.from_phone,
     supabase
   });
@@ -1346,7 +1362,36 @@ async function ensureFallbackLeadFromTranscript({ businessId, callSessionId, fal
     .eq("id", callSessionId);
 
   if (updateError) throw new Error(updateError.message);
-  return { customerId: customer.id, jobId: job?.id || null, summary };
+
+  const notification = await notifyOwnerSummary({
+    actionNeeded: language === "es" ? "Revisar y contactar al cliente." : "Review and contact the customer.",
+    business,
+    businessId,
+    callSessionId,
+    customerId: customer.id,
+    ownerMessageBody: ownerSummarySmsBody({
+      address: address || customer.address || null,
+      customerName: customerFullName,
+      customerPhone,
+      language,
+      propertyAccess: language === "es" ? "No recopilado" : "Not collected",
+      requestedFor: null,
+      serviceType: serviceType || "service",
+      status: "lead"
+    }),
+    ownerEmail,
+    ownerPhone,
+    summary,
+    summaryChannel: business.owner_summary_channel,
+    summaryLanguage: language,
+    supabase
+  });
+
+  if (!notification.ok) {
+    console.error("Could not notify owner about fallback lead:", notification);
+  }
+
+  return { customerId: customer.id, jobId: job?.id || null, notification, summary };
 }
 
 async function rewriteOwnerText({ kind = "summary", language, text }) {
@@ -1804,12 +1849,33 @@ async function evaluateServiceArea({ address, business, radiusRule }) {
   };
 }
 
-function customerBookingConfirmationText({ address, agent, businessName, customerName, serviceType, start, timeZone }) {
+function customerBookingResponseTexts({ address, agent, businessName, customerName, language, serviceType, start, timeZone }) {
   const greetingName = cleanToolText(customerName, 80).split(/\s+/)[0];
   const safeAddress = cleanToolText(address, 180);
+  const safeAgent = cleanToolText(agent, 40);
+  const safeBusiness = cleanToolText(businessName, 120);
+  const service = ownerServiceLabel(serviceType, language);
+  const requestedFor = localizedDateTime(start, timeZone, language);
+
+  if (language === "es") {
+    const greeting = greetingName ? `Hola ${greetingName}` : "Hola";
+    const location = safeAddress ? ` en ${safeAddress}` : "";
+    return {
+      alt: `${greeting}, soy ${safeAgent} de ${safeBusiness}. Ese horario ya no está disponible, pero todavía podemos ayudarle. ¿Qué otro día u hora le funciona?`,
+      call: `${greeting}, soy ${safeAgent} de ${safeBusiness}. El dueño le llamará para confirmar el mejor horario para su solicitud de ${service}.`,
+      confirmed: `${greeting}, soy ${safeAgent} de ${safeBusiness}. Su cita para ${service} está confirmada para ${requestedFor}${location}. Responda aquí si necesita cambiar algo.`,
+      declined: `${greeting}, soy ${safeAgent} de ${safeBusiness}. Recibimos su solicitud para ${service}, pero esa cita no está confirmada. El dueño la revisará y le dará seguimiento si puede ayudarle.`
+    };
+  }
+
   const greeting = greetingName ? `Hi ${greetingName}` : "Hi";
   const location = safeAddress ? ` at ${safeAddress}` : "";
-  return `${greeting}, this is ${cleanToolText(agent, 40)} with ${cleanToolText(businessName, 120)}. Your ${serviceLabel(serviceType)} appointment is confirmed for ${spokenDateTime(start, timeZone)}${location}. Reply here if you need to update it.`;
+  return {
+    alt: `${greeting}, this is ${safeAgent} with ${safeBusiness}. That time is not available anymore, but we can still help. What other day or time works for you?`,
+    call: `${greeting}, this is ${safeAgent} with ${safeBusiness}. The owner will call you back to confirm the best time for your ${service} request.`,
+    confirmed: `${greeting}, this is ${safeAgent} with ${safeBusiness}. Your ${service} appointment is confirmed for ${requestedFor}${location}. Reply here if you need to update anything.`,
+    declined: `${greeting}, this is ${safeAgent} with ${safeBusiness}. We received your ${service} request, but that appointment time is not confirmed. The owner will review it and follow up if they can help.`
+  };
 }
 
 function ownerBookingApprovalText({
@@ -1819,22 +1885,52 @@ function ownerBookingApprovalText({
   customerName,
   customerPhone,
   estimatedValue,
+  language,
   propertyAccess,
   serviceType,
   start,
   timeZone
 }) {
-  const location = address ? `\nAddress: ${cleanToolText(address, 180)}` : "";
-  const access = `Access: ${propertyAccessNotes(propertyAccess)}`;
+  const service = ownerServiceLabel(serviceType, language);
+  const requestedFor = localizedDateTime(start, timeZone, language);
   const value = Number.isFinite(Number(estimatedValue)) ? Number(estimatedValue) : 0;
+
+  if (language === "es") {
+    return [
+      `${cleanToolText(agent, 40)}: Solicitud de cita para ${cleanToolText(businessName, 120)}`,
+      "",
+      `${cleanToolText(customerName, 120) || "Cliente"}${customerPhone ? ` (${cleanToolText(customerPhone, 40)})` : ""}`,
+      `Servicio: ${service}`,
+      `Fecha: ${requestedFor}`,
+      address ? `Dirección: ${cleanToolText(address, 180)}` : "",
+      `Acceso: ${propertyAccessNotes(propertyAccess)}`,
+      `Valor: $${Math.round(value)}`,
+      "",
+      "Responda:",
+      "YES = confirmar y avisar al cliente",
+      "ALT = pedir otro horario",
+      "CALL = decir que el dueño llamará",
+      "NO = guardar como cliente potencial, no confirmado"
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   return [
-    `${cleanToolText(agent, 40)} booking request for ${cleanToolText(businessName, 120)}:`,
+    `${cleanToolText(agent, 40)}: Booking request for ${cleanToolText(businessName, 120)}`,
+    "",
     `${cleanToolText(customerName, 120) || "Customer"}${customerPhone ? ` (${cleanToolText(customerPhone, 40)})` : ""}`,
-    `${serviceLabel(serviceType)} - ${spokenDateTime(start, timeZone)}`,
+    `Service: ${service}`,
+    `Requested: ${requestedFor}`,
+    address ? `Address: ${cleanToolText(address, 180)}` : "",
+    `Access: ${propertyAccessNotes(propertyAccess)}`,
     `Value: $${Math.round(value)}`,
-    `${location}`,
-    access,
-    "Reply YES to confirm and text the customer. Reply NO to keep it as a lead."
+    "",
+    "Reply:",
+    "YES = confirm + text customer",
+    "ALT = ask customer for another time",
+    "CALL = tell customer owner will call",
+    "NO = keep as lead, not confirmed"
   ]
     .filter(Boolean)
     .join("\n");
@@ -1845,6 +1941,7 @@ async function createOwnerBookingConfirmation({
   business,
   callSessionId,
   customer,
+  customerLanguage,
   estimatedValue,
   jobId,
   ownerPhone,
@@ -1859,11 +1956,13 @@ async function createOwnerBookingConfirmation({
 
   const customerPhone = normalizePhone(toPhone);
   const agent = agentName(business);
-  const customerConfirmationBody = customerBookingConfirmationText({
+  const language = ownerSummaryLanguage(customerLanguage);
+  const customerMessages = customerBookingResponseTexts({
     address,
     agent,
     businessName: business.name,
     customerName: customer.full_name,
+    language,
     serviceType,
     start,
     timeZone
@@ -1875,6 +1974,7 @@ async function createOwnerBookingConfirmation({
     customerName: customer.full_name,
     customerPhone,
     estimatedValue,
+    language: ownerSummaryLanguage(business.owner_summary_language),
     propertyAccess,
     serviceType,
     start,
@@ -1888,8 +1988,12 @@ async function createOwnerBookingConfirmation({
     .insert({
       business_id: business.id,
       call_session_id: callSessionId || null,
-      customer_confirmation_body: customerConfirmationBody,
+      customer_alt_body: customerMessages.alt,
+      customer_call_body: customerMessages.call,
+      customer_confirmation_body: customerMessages.confirmed,
+      customer_decline_body: customerMessages.declined,
       customer_id: customer.id,
+      customer_language: language,
       customer_phone: customerPhone,
       due_at: new Date().toISOString(),
       job_id: jobId,
@@ -1937,6 +2041,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
   const savedAddress = normalizeAddressForStorage(existingCustomer?.address);
   const addressConfirmed = addressConfirmedValue(args.address_confirmed);
   const propertyAccess = propertyAccessNotes(args.property_access_notes);
+  const customerLanguage = ownerSummaryLanguage(args.customer_language);
   const customerFullName = requireCustomerFullName({ args, callerPhone, existingCustomer });
 
   if (!serviceOptions.includes(args.service_type)) {
@@ -2095,7 +2200,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
       scheduled_end: end.toISOString(),
       scheduled_start: start.toISOString(),
       service_type: args.service_type,
-      status: "pending",
+      status: "pending_owner_approval",
       title: bookingTitle(args.service_type)
     })
     .select("id")
@@ -2116,6 +2221,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
     business,
     callSessionId,
     customer,
+    customerLanguage,
     estimatedValue: appointmentEstimatedValue(args, customer),
     jobId: job.id,
     ownerPhone,
@@ -2130,10 +2236,6 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
     return { ok: false, error: error.message };
   });
 
-  if (!ownerApproval.ok) {
-    await supabase.from("jobs").update({ status: "lead" }).eq("id", job.id);
-  }
-
   if (callSessionId) {
     await supabase
       .from("call_sessions")
@@ -2141,10 +2243,10 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
         contact_type: "customer",
         customer_id: customer.id,
         job_id: job.id,
-	        needs_owner_review: ownerApproval.ok,
+	        needs_owner_review: true,
 	        outcome: ownerApproval.ok
 	          ? `Needs owner approval for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}.`
-	          : `New lead created for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}. Owner follow-up needed.`,
+	          : `Booking request needs owner review for ${serviceLabel(args.service_type)} on ${spokenDateTime(start, timeZone)}. Approval SMS delivery failed.`,
 	        status: "completed"
 	      })
 	      .eq("id", callSessionId);
@@ -2170,7 +2272,7 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 	      propertyAccess,
 	      requestedFor: scheduledFor,
 	      serviceType: args.service_type,
-	      status: ownerApproval.ok ? "approval" : "lead"
+	      status: "approval"
 	    });
 
     await notifyOwnerSummary({
@@ -2190,9 +2292,8 @@ async function bookAppointment({ args, callSessionId, businessId, callerPhone, k
 
   return {
     customer_name: customer.full_name,
-    message: ownerApproval.ok
-      ? "Tell the caller the appointment request has been sent to the owner and they will receive a confirmation text after approval. Then ask if there is anything else you can help with."
-      : "Tell the caller the appointment request was saved and the owner will follow up. Then ask if there is anything else you can help with.",
+    message:
+      "Tell the caller: “I’ll send this request to the owner for approval. This is not confirmed yet, but we’ll text you once it’s reviewed.” Then ask if there is anything else you can help with.",
     owner_approval_sent: Boolean(ownerApproval.ok),
     ok: true,
     scheduled_for: spokenDateTime(start, timeZone)
@@ -2419,10 +2520,9 @@ async function finishRealtimeCall({
   }
 
   const fallbackLead = allowFallbackLead
-    ? await ensureFallbackLeadFromTranscript({
+      ? await ensureFallbackLeadFromTranscript({
         businessId,
         callSessionId,
-        fallbackOutcome: existing.outcome || outcome,
         transcript: values.transcript
       }).catch((fallbackError) => {
         console.error("Could not create fallback lead from transcript:", fallbackError.message);
@@ -2451,15 +2551,15 @@ async function transferToOwner({ businessId, callSid, callSessionId, reason }) {
     providerEnvironment: process.env.TWILIO_ENV,
     service: "voice-gateway-transfer"
   });
-  const { business, ownerPhone, supabase } = await getBusinessContext(businessId);
+  const { business, ownerTransferPhone, supabase } = await getBusinessContext(businessId);
 
-  if (!ownerPhone) {
+  if (!ownerTransferPhone) {
     return { ok: false, message: "No owner transfer phone is configured." };
   }
 
   const callerId = business.twilio_routing_phone || business.phone || undefined;
   const callerIdAttribute = callerId ? ` callerId="${xmlEscape(callerId)}"` : "";
-  const twiml = `<Response><Dial${callerIdAttribute}>${xmlEscape(ownerPhone)}</Dial></Response>`;
+  const twiml = `<Response><Dial${callerIdAttribute}>${xmlEscape(ownerTransferPhone)}</Dial></Response>`;
   const body = new URLSearchParams({ Twiml: twiml });
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`, {
     body,
@@ -2603,6 +2703,11 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
               "True only after the caller verbally confirms the service address during this call. For an existing customer, confirm their saved address or ask for the new address first."
           },
           customer_email: { type: "string" },
+          customer_language: {
+            type: "string",
+            description: "Language Ana used with the caller for customer follow-up texts.",
+            enum: ["en", "es"]
+          },
           customer_name: {
             type: "string",
             description: "Customer's real full first and last name. Never pass a phone number, Caller +phone, or placeholder."
@@ -2632,6 +2737,7 @@ function realtimeTools(serviceOptions = SERVICE_OPTIONS) {
         },
         required: [
           "address_confirmed",
+          "customer_language",
           "customer_name",
           "property_access_confirmed",
           "property_access_notes",
@@ -2777,14 +2883,14 @@ function sessionInstructions({ business, knownCustomer, owner, radiusRule }) {
     "After the basic service, address, and scheduling details are collected, but before saving the booking request or lead, ask one natural final property-access question. Example: 'Before I send this over, is there anything the crew should know about getting onto the property, like pets, a gate or gate code, parking, unit or building instructions, or anything else?' Do not ask this near the start of the call.",
     "Save the caller's answer in property_access_notes exactly enough for the owner to act on it. If the caller says there is nothing else, use 'None reported'. If they decline, use 'Caller declined'. Never invent access details or set property_access_confirmed true before asking.",
     "Always call list_available_slots before offering times unless the caller asks for a specific time. Never book over an existing calendar event.",
-    "Only call book_appointment after the caller clearly agrees to a specific available date and time, the address has been confirmed, and the property-access question has been answered or declined during this call. Set address_confirmed and property_access_confirmed true only after those verbal confirmations. This creates an owner approval request, not a final confirmed booking.",
+    "Only call book_appointment after the caller clearly agrees to a specific available date and time, the address has been confirmed, and the property-access question has been answered or declined during this call. Set customer_language to en or es based on the language used with the caller. Set address_confirmed and property_access_confirmed true only after those verbal confirmations. This creates an owner approval request, not a final confirmed booking.",
     "After saving a booking request or lead details, ask the caller if there is anything else you can help with.",
     `If the call is business-related but does not result in a booking, ask the property-access question after the basic lead details, then silently call record_call_summary before ending the call. Include the customer name, confirmed address when available, service/work requested, preferred day/time if mentioned, and property access notes. Write the tool summary in ${ownerSummaryLanguage(business.owner_summary_language) === "es" ? "Spanish" : "English"}.`,
     "When the caller says no, thanks, thank you, goodbye, that's all, or otherwise clearly has nothing else, call end_call. After end_call, say a short goodbye like 'Okay, I am hanging up now. Have a good day.' and stop talking.",
     "If the caller is personal, a vendor, spam, not a customer, or asks for the owner/human, call transfer_to_owner.",
     "If the caller wants a price quote for a listed service, collect details and offer to schedule a quote appointment inside business hours. Use estimated_value 0 when booking a quote appointment unless a known customer service fee applies.",
     "Do not promise a final price unless a booking value is returned by a tool.",
-    "After book_appointment succeeds, tell the caller the request was sent to the owner and they will receive a confirmation text after approval, then ask if there is anything else. Do not say the booking is final until owner approval happens."
+    "After book_appointment succeeds, say: 'I’ll send this request to the owner for approval. This is not confirmed yet, but we’ll text you once it’s reviewed.' Say it naturally in the caller's language, then ask if there is anything else. Do not say the booking is final until owner approval happens."
   ].join("\n");
   assertNoProtectedSecrets(instructions, "Ana realtime session instructions");
   return instructions;
@@ -3027,7 +3133,6 @@ async function handleToolCall({ call, state, openaiWs, twilioWs }) {
       });
       if (output.ok) state.finalized = true;
     } else if (call.name === "end_call") {
-      state.finalized = true;
       state.pendingHangup = true;
       output = {
         ok: true,

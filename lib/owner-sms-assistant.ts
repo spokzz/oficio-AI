@@ -125,6 +125,7 @@ const assistantSignals =
   /\b(minutes?|usage|bookings?|appointments?|jobs?|calls?|leads?|reminders?|customers?|save|add|update|delete|remove|cancel|text|send|help|minutos?|uso|citas?|trabajos?|llamadas?|clientes?|recordatorios?|guarda|agrega|actualiza|borra|elimina|cancela|env[ií]a|ayuda)\b/i;
 const positiveConfirmation = /^(confirm|confirmar|yes|y|si|sí|ok|okay|dale|send it|env[ií]alo|env[ií]ala)\b/i;
 const negativeConfirmation = /^(no|cancel|cancelar|stop|detente)\b/i;
+const actionableLeadStatuses = ["lead", "needs_reschedule", "needs_callback", "lead_not_confirmed"] as const;
 
 function compact(value: string | null | undefined, max = 500) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -644,7 +645,7 @@ async function newLeadsReply(businessId: string, language: Language, timeZone: s
     .from("jobs")
     .select("id,title,service_type,status,scheduled_start,address,customer_id,created_at,customers(full_name,phone)")
     .eq("business_id", businessId)
-    .eq("status", "lead")
+    .in("status", [...actionableLeadStatuses])
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(8);
@@ -908,7 +909,10 @@ async function matchingJobs(businessId: string, request: ExtractedRequest, statu
       .select("id,title,service_type,status,scheduled_start,address,customer_id,owner_notes,ai_notes,customers(full_name,phone)")
       .eq("business_id", businessId)
       .eq("id", request.target_id);
-    query = statusKind === "lead" ? query.eq("status", "lead") : query.neq("status", "lead");
+    query =
+      statusKind === "lead"
+        ? query.in("status", [...actionableLeadStatuses])
+        : query.not("status", "in", `(${actionableLeadStatuses.join(",")})`);
     const { data } = await query.maybeSingle<JobRecord>();
     return data ? [data] : [];
   }
@@ -922,7 +926,10 @@ async function matchingJobs(businessId: string, request: ExtractedRequest, statu
     .in("customer_id", customers.map((customer) => customer.id))
     .order("updated_at", { ascending: false })
     .limit(8);
-  query = statusKind === "lead" ? query.eq("status", "lead") : query.neq("status", "lead");
+  query =
+    statusKind === "lead"
+      ? query.in("status", [...actionableLeadStatuses])
+      : query.not("status", "in", `(${actionableLeadStatuses.join(",")})`);
   const { data } = await query;
   return (data ?? []) as unknown as JobRecord[];
 }
@@ -1009,7 +1016,9 @@ function jobChanges(request: ExtractedRequest, timeZone: string) {
     if (/^(booked|confirmed|confirmado|confirmada)$/.test(normalizedStatus)) changes.status = "confirmed";
     else if (/^(complete|completed|completo|completado|terminado)$/.test(normalizedStatus)) changes.status = "completed";
     else if (/^(cancel|canceled|cancelled|cancelado|cancelada)$/.test(normalizedStatus)) changes.status = "canceled";
-    else if (/^(lead|pending|in_progress)$/.test(normalizedStatus)) changes.status = normalizedStatus;
+    else if (/^(lead|pending|pending_owner_approval|needs_reschedule|needs_callback|lead_not_confirmed|in_progress)$/.test(normalizedStatus)) {
+      changes.status = normalizedStatus;
+    }
   }
   if (request.date && request.time) changes.scheduled_start = localDateTimeToUtc(request.date, request.time, timeZone).toISOString();
   return changes;
@@ -1179,9 +1188,20 @@ async function executeConfirmation({
     if (error) throw new Error(error.message);
     await recordAuditEvent(supabase, { ...auditContext, action: "owner_sms_customer_deleted", before: before ?? null, businessId, entityId: pending.target_id, entityType: "customer" });
   } else if (action === "delete_lead") {
-    const { data: before } = await supabase.from("jobs").select("id,status,service_type,customer_id").eq("business_id", businessId).eq("id", pending.target_id).eq("status", "lead").maybeSingle();
+    const { data: before } = await supabase
+      .from("jobs")
+      .select("id,status,service_type,customer_id")
+      .eq("business_id", businessId)
+      .eq("id", pending.target_id)
+      .in("status", [...actionableLeadStatuses])
+      .maybeSingle();
     if (!before) throw new Error("Lead no longer exists.");
-    const { error } = await supabase.from("jobs").delete().eq("business_id", businessId).eq("id", pending.target_id).eq("status", "lead");
+    const { error } = await supabase
+      .from("jobs")
+      .delete()
+      .eq("business_id", businessId)
+      .eq("id", pending.target_id)
+      .in("status", [...actionableLeadStatuses]);
     if (error) throw new Error(error.message);
     await recordAuditEvent(supabase, { ...auditContext, action: "owner_sms_lead_deleted", before, businessId, entityId: pending.target_id, entityType: "job" });
   } else if (action === "delete_booking") {

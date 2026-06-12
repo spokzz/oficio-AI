@@ -17,6 +17,8 @@ function confirmationReply(body: string) {
   const normalized = body.trim().toLowerCase();
 
   if (/^(yes|y|si|sí|1)\b/.test(normalized)) return "yes";
+  if (/^(alt|alternative|otro|otra|3)\b/.test(normalized)) return "alt";
+  if (/^(call|callback|llamar|llamada|4)\b/.test(normalized)) return "call";
   if (/^(no|n|2)\b/.test(normalized)) return "no";
   return null;
 }
@@ -25,14 +27,19 @@ function messageTwiml(message: string) {
   return `<Response><Message>${xmlEscape(message)}</Message></Response>`;
 }
 
-function validCustomerConfirmationSms(body: string) {
+function validCustomerBookingResponseSms(body: string, response: "yes" | "alt" | "call" | "no") {
   const compact = body.replace(/\s+/g, " ").trim();
   if (!compact || compact.length > 500) return false;
-  if (!/^Hi\b/i.test(compact)) return false;
-  if (!/\bappointment is confirmed for\b/i.test(compact)) return false;
-  if (!/\bReply here if you need to update it\.$/i.test(compact)) return false;
+  if (!/^(Hi|Hola)\b/i.test(compact)) return false;
   if (/\b(api key|system prompt|developer message|internal instructions|owner private notes|ignore instructions)\b/i.test(compact)) return false;
-  return true;
+
+  const expected = {
+    alt: /\b(time is not available anymore|horario ya no está disponible)\b/i,
+    call: /\b(owner will call you back|dueño le llamará)\b/i,
+    no: /\b(appointment time is not confirmed|cita no está confirmada)\b/i,
+    yes: /\b(appointment is confirmed for|cita para .+ está confirmada para)\b/i
+  };
+  return expected[response].test(compact);
 }
 
 function forwardedMessage(body: string) {
@@ -71,12 +78,126 @@ function smsActionNeeded(kind: "forwarded" | "inbound", language?: string | null
 
 type OwnerBookingConfirmation = {
   business_id: string;
+  call_session_id: string | null;
+  customer_alt_body: string | null;
+  customer_call_body: string | null;
   customer_confirmation_body: string;
+  customer_decline_body: string | null;
   customer_id: string | null;
+  customer_language: string | null;
   customer_phone: string | null;
   id: string;
   job_id: string;
 };
+
+type BookingOwnerResponse = "yes" | "alt" | "call" | "no";
+
+const bookingResponseConfig = {
+  alt: {
+    auditAction: "booking_reschedule_requested",
+    bodyField: "customer_alt_body",
+    confirmationStatus: "reschedule_requested",
+    jobStatus: "needs_reschedule",
+    ownerResponse: "alt_reschedule",
+    successReply: "Ana asked the customer for another day or time."
+  },
+  call: {
+    auditAction: "booking_callback_requested",
+    bodyField: "customer_call_body",
+    confirmationStatus: "callback_requested",
+    jobStatus: "needs_callback",
+    ownerResponse: "call_callback",
+    successReply: "Ana told the customer you will call to confirm the best time."
+  },
+  no: {
+    auditAction: "booking_not_confirmed",
+    bodyField: "customer_decline_body",
+    confirmationStatus: "declined",
+    jobStatus: "lead_not_confirmed",
+    ownerResponse: "no_decline",
+    successReply: "Ana kept the request as a lead and sent the customer a polite update."
+  },
+  yes: {
+    auditAction: "booking_approved",
+    bodyField: "customer_confirmation_body",
+    confirmationStatus: "approved",
+    jobStatus: "confirmed",
+    ownerResponse: "yes_approve",
+    successReply: "Confirmed. Ana texted the customer with the booking details."
+  }
+} as const;
+
+function customerServiceLabel(serviceType: string | null, language: "en" | "es") {
+  const labels: Record<string, [string, string]> = {
+    irrigation: ["irrigation", "riego"],
+    landscaping: ["landscaping", "paisajismo"],
+    mowing: ["lawn mowing", "corte de césped"],
+    tree_cutting: ["tree services", "servicios de árboles"],
+    yard_cleanup: ["yard cleanup", "limpieza de patio"]
+  };
+  return labels[String(serviceType ?? "").toLowerCase()]?.[language === "es" ? 1 : 0] ?? (language === "es" ? "servicio" : "service");
+}
+
+function fallbackCustomerBookingResponse({
+  address,
+  agent,
+  businessName,
+  customerName,
+  language,
+  response,
+  scheduledStart,
+  serviceType,
+  timeZone
+}: {
+  address: string | null;
+  agent: string | null;
+  businessName: string;
+  customerName: string | null;
+  language: "en" | "es";
+  response: BookingOwnerResponse;
+  scheduledStart: string | null;
+  serviceType: string | null;
+  timeZone: string | null;
+}) {
+  const firstName = String(customerName ?? "").trim().split(/\s+/)[0];
+  const safeAgent = String(agent || "Ana").trim() || "Ana";
+  const service = customerServiceLabel(serviceType, language);
+  const requestedFor = scheduledStart
+    ? new Intl.DateTimeFormat(language === "es" ? "es-US" : "en-US", {
+        dateStyle: "full",
+        timeStyle: "short",
+        timeZone: timeZone || "America/Chicago"
+      }).format(new Date(scheduledStart))
+    : language === "es"
+      ? "el horario solicitado"
+      : "the requested time";
+
+  if (language === "es") {
+    const greeting = firstName ? `Hola ${firstName}` : "Hola";
+    if (response === "yes") {
+      return `${greeting}, soy ${safeAgent} de ${businessName}. Su cita para ${service} está confirmada para ${requestedFor}${address ? ` en ${address}` : ""}. Responda aquí si necesita cambiar algo.`;
+    }
+    if (response === "alt") {
+      return `${greeting}, soy ${safeAgent} de ${businessName}. Ese horario ya no está disponible, pero todavía podemos ayudarle. ¿Qué otro día u hora le funciona?`;
+    }
+    if (response === "call") {
+      return `${greeting}, soy ${safeAgent} de ${businessName}. El dueño le llamará para confirmar el mejor horario para su solicitud de ${service}.`;
+    }
+    return `${greeting}, soy ${safeAgent} de ${businessName}. Recibimos su solicitud para ${service}, pero esa cita no está confirmada. El dueño la revisará y le dará seguimiento si puede ayudarle.`;
+  }
+
+  const greeting = firstName ? `Hi ${firstName}` : "Hi";
+  if (response === "yes") {
+    return `${greeting}, this is ${safeAgent} with ${businessName}. Your ${service} appointment is confirmed for ${requestedFor}${address ? ` at ${address}` : ""}. Reply here if you need to update anything.`;
+  }
+  if (response === "alt") {
+    return `${greeting}, this is ${safeAgent} with ${businessName}. That time is not available anymore, but we can still help. What other day or time works for you?`;
+  }
+  if (response === "call") {
+    return `${greeting}, this is ${safeAgent} with ${businessName}. The owner will call you back to confirm the best time for your ${service} request.`;
+  }
+  return `${greeting}, this is ${safeAgent} with ${businessName}. We received your ${service} request, but that appointment time is not confirmed. The owner will review it and follow up if they can help.`;
+}
 
 async function handleOwnerBookingConfirmation({
   auditContext,
@@ -86,174 +207,107 @@ async function handleOwnerBookingConfirmation({
 }: {
   auditContext: AuditContext;
   confirmation: OwnerBookingConfirmation;
-  response: "yes" | "no";
+  response: BookingOwnerResponse;
   toPhone: string | null;
 }) {
   const supabase = createAdminClient();
   const now = new Date().toISOString();
-  const { data: beforeJob, error: beforeJobError } = await supabase
-    .from("jobs")
-    .select("id,status,scheduled_start,customer_id,service_type,address")
-    .eq("id", confirmation.job_id)
-    .maybeSingle();
+  const config = bookingResponseConfig[response];
+  const [
+    { data: beforeJob, error: beforeJobError },
+    { data: business },
+    { data: customer },
+    { data: callSession }
+  ] = await Promise.all([
+    supabase
+      .from("jobs")
+      .select("id,status,scheduled_start,customer_id,service_type,address")
+      .eq("id", confirmation.job_id)
+      .maybeSingle(),
+    supabase
+      .from("businesses")
+      .select("name,ai_voice_name,booking_time_zone,messaging_service_sid,twilio_routing_phone")
+      .eq("id", confirmation.business_id)
+      .maybeSingle<{
+        ai_voice_name: string | null;
+        booking_time_zone: string | null;
+        messaging_service_sid: string | null;
+        name: string;
+        twilio_routing_phone: string | null;
+      }>(),
+    confirmation.customer_id
+      ? supabase
+          .from("customers")
+          .select("full_name,preferred_language")
+          .eq("id", confirmation.customer_id)
+          .maybeSingle<{ full_name: string | null; preferred_language: string | null }>()
+      : Promise.resolve({ data: null, error: null }),
+    confirmation.call_session_id
+      ? supabase
+          .from("call_sessions")
+          .select("detected_language")
+          .eq("id", confirmation.call_session_id)
+          .maybeSingle<{ detected_language: string | null }>()
+      : Promise.resolve({ data: null, error: null })
+  ]);
 
-  if (beforeJobError) {
+  if (beforeJobError || !beforeJob || !business) {
     return twimlResponse(messageTwiml("Ana could not read that booking request. Please try again."), { status: 500 });
   }
 
-  if (response === "no") {
-    const { error: jobError } = await supabase.from("jobs").update({ status: "lead" }).eq("id", confirmation.job_id);
-    if (jobError) {
-      return twimlResponse(messageTwiml("Ana could not move that booking request to leads. Please try again."), { status: 500 });
-    }
-
-    const { error: confirmationError } = await supabase
-      .from("owner_booking_confirmations")
-      .update({
-        answered_at: now,
-        owner_response: "no_decline",
-        status: "declined"
-      })
-      .eq("id", confirmation.id);
-
-    if (confirmationError) {
-      return twimlResponse(messageTwiml("Ana saved the lead but could not close the approval request."), { status: 500 });
-    }
-
-    await recordAuditEvent(supabase, {
-      ...auditContext,
-      action: "booking_declined",
-      after: { owner_response: "no_decline", status: "declined" },
-      before: { owner_response: null, status: beforeJob?.status ?? null },
-      businessId: confirmation.business_id,
-      entityId: confirmation.id,
-      entityType: "owner_booking_confirmation"
-    });
-    if (beforeJob?.status !== "lead") {
-      await recordAuditEvent(supabase, {
-        ...auditContext,
-        action: "job_status_changed",
-        after: { status: "lead" },
-        before: { status: beforeJob?.status ?? null },
-        businessId: confirmation.business_id,
-        entityId: confirmation.job_id,
-        entityType: "job"
-      });
-    }
-
-    return twimlResponse(messageTwiml("Got it. Ana moved the booking request to Leads and did not text the customer."));
-  }
-
-  const { error: jobError } = await supabase.from("jobs").update({ status: "confirmed" }).eq("id", confirmation.job_id);
+  const { error: jobError } = await supabase.from("jobs").update({ status: config.jobStatus }).eq("id", confirmation.job_id);
   if (jobError) {
-    return twimlResponse(messageTwiml("Ana could not confirm that booking. Please try again."), { status: 500 });
+    return twimlResponse(messageTwiml("Ana could not update that booking request. Please try again."), { status: 500 });
   }
 
   let customerMessageSid: string | null = null;
+  let deliveryError: string | null = null;
   const customerPhone = normalizePhone(confirmation.customer_phone);
+  const language = ownerSummaryLanguage(confirmation.customer_language || callSession?.detected_language || customer?.preferred_language);
+  const customerBody =
+    confirmation[config.bodyField] ||
+    fallbackCustomerBookingResponse({
+      address: beforeJob.address,
+      agent: business.ai_voice_name,
+      businessName: business.name,
+      customerName: customer?.full_name ?? null,
+      language,
+      response,
+      scheduledStart: beforeJob.scheduled_start,
+      serviceType: beforeJob.service_type,
+      timeZone: business.booking_time_zone
+    });
 
   if (customerPhone) {
-    if (!validCustomerConfirmationSms(confirmation.customer_confirmation_body)) {
-      await supabase
-        .from("owner_booking_confirmations")
-        .update({
-          answered_at: now,
-          error_message: "Customer confirmation SMS failed template validation.",
-          owner_response: "yes_approve",
-          status: "failed"
-        })
-        .eq("id", confirmation.id);
-
-      await recordAuditEvent(supabase, {
-        ...auditContext,
-        action: "booking_approved",
-        after: {
-          error_message: "Customer confirmation SMS failed template validation.",
-          owner_response: "yes_approve",
-          status: "failed"
-        },
-        before: { owner_response: null, status: beforeJob?.status ?? null },
-        businessId: confirmation.business_id,
-        entityId: confirmation.id,
-        entityType: "owner_booking_confirmation"
-      });
-      if (beforeJob?.status !== "confirmed") {
-        await recordAuditEvent(supabase, {
-          ...auditContext,
-          action: "job_status_changed",
-          after: { status: "confirmed" },
-          before: { status: beforeJob?.status ?? null },
-          businessId: confirmation.business_id,
-          entityId: confirmation.job_id,
-          entityType: "job"
+    if (!customerBody || !validCustomerBookingResponseSms(customerBody, response)) {
+      deliveryError = "Customer response SMS failed template validation.";
+    } else {
+      try {
+        const sent = await sendTwilioSms({
+          body: customerBody,
+          ...businessSmsSender(business),
+          to: customerPhone
         });
-      }
+        customerMessageSid = sent.sid;
 
-      return twimlResponse(messageTwiml("Booking approved, but Ana could not text the customer because the message template was invalid. Please follow up manually."));
-    }
-
-    try {
-      const { data: businessSender } = await supabase
-        .from("businesses")
-        .select("messaging_service_sid,twilio_routing_phone")
-        .eq("id", confirmation.business_id)
-        .maybeSingle<{ messaging_service_sid: string | null; twilio_routing_phone: string | null }>();
-      const sent = await sendTwilioSms({
-        body: confirmation.customer_confirmation_body,
-        ...businessSmsSender(businessSender),
-        to: customerPhone
-      });
-      customerMessageSid = sent.sid;
-
-      await supabase.from("messages").insert({
-        body: confirmation.customer_confirmation_body,
-        business_id: confirmation.business_id,
-        channel: "sms",
-        customer_id: confirmation.customer_id,
-        direction: "outbound",
-        from_phone: sent.from ?? toPhone,
-        job_id: confirmation.job_id,
-        language: null,
-        provider_message_id: customerMessageSid,
-        to_phone: customerPhone
-      });
-    } catch (sendError) {
-      const message = sendError instanceof Error ? sendError.message : "Could not send customer confirmation.";
-      await supabase
-        .from("owner_booking_confirmations")
-        .update({
-          answered_at: now,
-          error_message: message,
-          owner_response: "yes_approve",
-          status: "approved"
-        })
-        .eq("id", confirmation.id);
-      await recordAuditEvent(supabase, {
-        ...auditContext,
-        action: "booking_approved",
-        after: {
-          error_message: message,
-          owner_response: "yes_approve",
-          status: "approved"
-        },
-        before: { owner_response: null, status: beforeJob?.status ?? null },
-        businessId: confirmation.business_id,
-        entityId: confirmation.id,
-        entityType: "owner_booking_confirmation"
-      });
-      if (beforeJob?.status !== "confirmed") {
-        await recordAuditEvent(supabase, {
-          ...auditContext,
-          action: "job_status_changed",
-          after: { status: "confirmed" },
-          before: { status: beforeJob?.status ?? null },
-          businessId: confirmation.business_id,
-          entityId: confirmation.job_id,
-          entityType: "job"
+        await supabase.from("messages").insert({
+          body: customerBody,
+          business_id: confirmation.business_id,
+          channel: "sms",
+          customer_id: confirmation.customer_id,
+          direction: "outbound",
+          from_phone: sent.from ?? toPhone,
+          job_id: confirmation.job_id,
+          language: null,
+          provider_message_id: customerMessageSid,
+          to_phone: customerPhone
         });
+      } catch (sendError) {
+        deliveryError = sendError instanceof Error ? sendError.message : "Could not send customer booking update.";
       }
-      return twimlResponse(messageTwiml("Booking confirmed, but Ana could not text the customer. Please follow up manually."));
     }
+  } else {
+    deliveryError = "No customer phone was available for SMS.";
   }
 
   const { error: confirmationError } = await supabase
@@ -261,33 +315,52 @@ async function handleOwnerBookingConfirmation({
     .update({
       answered_at: now,
       customer_message_sid: customerMessageSid,
-      owner_response: "yes_approve",
-      status: "approved"
+      error_message: deliveryError,
+      owner_response: config.ownerResponse,
+      status: config.confirmationStatus
     })
     .eq("id", confirmation.id);
 
   if (confirmationError) {
-    return twimlResponse(messageTwiml("Ana confirmed the booking but could not close the approval request."), { status: 500 });
+    return twimlResponse(messageTwiml("Ana updated the request but could not close the owner approval record."), { status: 500 });
+  }
+
+  if (confirmation.call_session_id) {
+    await supabase
+      .from("call_sessions")
+      .update({
+        needs_owner_review: false,
+        outcome:
+          response === "yes"
+            ? "Owner approved the requested appointment."
+            : response === "alt"
+              ? "Owner requested a different appointment time."
+              : response === "call"
+                ? "Owner will call the customer to confirm a time."
+                : "Requested appointment was not confirmed; retained as a lead."
+      })
+      .eq("id", confirmation.call_session_id);
   }
 
   await recordAuditEvent(supabase, {
     ...auditContext,
-    action: "booking_approved",
+    action: config.auditAction,
     after: {
       customer_message_sid: customerMessageSid,
-      owner_response: "yes_approve",
-      status: "approved"
+      error_message: deliveryError,
+      owner_response: config.ownerResponse,
+      status: config.confirmationStatus
     },
     before: { owner_response: null, status: beforeJob?.status ?? null },
     businessId: confirmation.business_id,
     entityId: confirmation.id,
     entityType: "owner_booking_confirmation"
   });
-  if (beforeJob?.status !== "confirmed") {
+  if (beforeJob?.status !== config.jobStatus) {
     await recordAuditEvent(supabase, {
       ...auditContext,
       action: "job_status_changed",
-      after: { status: "confirmed" },
+      after: { status: config.jobStatus },
       before: { status: beforeJob?.status ?? null },
       businessId: confirmation.business_id,
       entityId: confirmation.job_id,
@@ -295,7 +368,11 @@ async function handleOwnerBookingConfirmation({
     });
   }
 
-  return twimlResponse(messageTwiml(customerPhone ? "Confirmed. Ana texted the customer with the booking details." : "Confirmed. No customer phone was available for SMS."));
+  if (deliveryError) {
+    return twimlResponse(messageTwiml(`Request updated, but Ana could not text the customer: ${deliveryError} Please follow up manually.`));
+  }
+
+  return twimlResponse(messageTwiml(config.successReply));
 }
 
 export async function POST(request: Request) {
@@ -446,7 +523,9 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   const { data: bookingConfirmation, error: bookingConfirmationError } = await supabase
     .from("owner_booking_confirmations")
-    .select("id,business_id,job_id,customer_id,customer_phone,customer_confirmation_body")
+    .select(
+      "id,business_id,job_id,customer_id,call_session_id,customer_phone,customer_language,customer_confirmation_body,customer_alt_body,customer_call_body,customer_decline_body"
+    )
     .eq("owner_phone", ownerPhone)
     .eq("business_id", routingContext.business.id)
     .in("status", ["pending", "sent"])
@@ -490,6 +569,10 @@ export async function POST(request: Request) {
       routingContext
     });
     return twimlResponse(messageTwiml(reply));
+  }
+
+  if (response !== "yes" && response !== "no") {
+    return twimlResponse(messageTwiml("Reply YES or NO for the caller classification request."));
   }
 
   const contactResponse = response === "yes" ? "yes_personal" : "no_business";
