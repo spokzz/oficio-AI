@@ -76,6 +76,8 @@ export function PortalShell({
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const shouldShowSearch = headerPlacement !== "topbar" && showSearch;
   const shouldShowTopbar = headerPlacement === "topbar" || shouldShowSearch || Boolean(topbarActions);
+  const mobileNav = nav.filter((item) => item.icon !== "quotes");
+  const isSettingsActive = nav.some((item) => item.icon === "settings" && item.active);
   const headerContent = (
     <div className="portal-heading">
       <div className="portal-heading-meta">
@@ -137,6 +139,16 @@ export function PortalShell({
         </form>
       </aside>
       <main className="portal-main">
+        <div className="mobile-portal-header">
+          <div className="mobile-portal-identity">
+            <Link className="mobile-brand-lockup" href="/">
+              <Image src="/brand/oficio-ai-mark.svg" alt="Oficio AI mark" width={36} height={36} priority />
+              <strong>Oficio AI</strong>
+            </Link>
+            <span>{eyebrow}</span>
+          </div>
+          {topbarActions ? <div className="mobile-header-actions">{topbarActions}</div> : null}
+        </div>
         {shouldShowTopbar ? (
           <div className={`portal-topbar ${headerPlacement === "topbar" ? "with-header" : ""}`}>
             {headerPlacement === "topbar" ? (
@@ -153,7 +165,26 @@ export function PortalShell({
         ) : null}
         {headerPlacement === "below" ? <header className="portal-header">{headerContent}</header> : null}
         {children}
+        {isSettingsActive ? (
+          <form action={signOutUser} className="mobile-settings-signout">
+            <input name="redirectTo" type="hidden" value={signOutRedirectTo} />
+            <button className="button ghost" type="submit">
+              <LogOut strokeWidth={2.2} />
+              <span>{signOutLabel}</span>
+            </button>
+          </form>
+        ) : null}
       </main>
+      <nav aria-label="Mobile navigation" className="mobile-bottom-nav">
+        {mobileNav.map((item) => (
+          <Link className={item.active ? "active" : ""} href={item.href} key={`mobile-${item.href}-${item.label}`}>
+            <span aria-hidden="true" className="mobile-bottom-nav-icon">
+              <NavItemIcon icon={item.icon} />
+            </span>
+            <span>{item.label}</span>
+          </Link>
+        ))}
+      </nav>
     </div>
   );
 }

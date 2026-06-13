@@ -125,16 +125,14 @@ export default async function OwnerPage({ searchParams }: OwnerPageProps) {
       signOutRedirectTo={`/owner/login?lang=${language}`}
       subtitle={copy.subtitle}
       topbarActions={
-        activeTab === "home" ? (
-          <div className="language-toggle portal-language-toggle" role="group" aria-label="Language">
-            <Link className={language === "es" ? "active" : ""} href={ownerHref("es", activeTab)}>
-              {languageLabels.es}
-            </Link>
-            <Link className={language === "en" ? "active" : ""} href={ownerHref("en", activeTab)}>
-              {languageLabels.en}
-            </Link>
-          </div>
-        ) : null
+        <div className="language-toggle portal-language-toggle" role="group" aria-label="Language">
+          <Link aria-label={languageLabels.en} className={language === "en" ? "active" : ""} href={ownerHref("en", activeTab)}>
+            EN
+          </Link>
+          <Link aria-label={languageLabels.es} className={language === "es" ? "active" : ""} href={ownerHref("es", activeTab)}>
+            ES
+          </Link>
+        </div>
       }
       title={`${currentGreeting(language)}, ${firstName}`}
     >

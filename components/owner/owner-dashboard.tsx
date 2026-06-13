@@ -4,7 +4,18 @@ import { useActionState, useCallback, useEffect, useMemo, useRef, useState, useT
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarPlus,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  FileText,
+  MessageSquareText,
+  Phone,
+  Sun
+} from "lucide-react";
 import {
   addOwnerAvailabilityException,
   addOwnerBooking,
@@ -24,10 +35,8 @@ import {
 } from "@/app/actions/owner";
 import {
   CalendarIcon,
-  DollarIcon,
   EyeIcon,
   LeafIcon,
-  MessageIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
@@ -77,8 +86,41 @@ type BusinessDay = (typeof businessDayOptions)[number]["value"];
 const copy = {
   es: {
     home: "Inicio",
+    todayAtGlance: "Resumen de hoy",
     totalBookings: "Reservas hoy",
     todayJobs: "Trabajos hoy",
+    newLeads: "Nuevos clientes potenciales",
+    needsAttention: "Necesita atención",
+    aiMinutesLeft: "Minutos AI restantes",
+    scheduled: "Programados",
+    needFollowUp: "Necesitan seguimiento",
+    overdue: "Pendiente",
+    ofMinutes: "de {minutes} min",
+    viewAll: "Ver todo",
+    quickActions: "Acciones rápidas",
+    callBack: "Devolver llamada",
+    sendQuote: "Enviar cotización",
+    textCustomer: "Enviar mensaje",
+    latestAnaActivity: "Última llamada con Ana",
+    noRecentCalls: "No hay llamadas recientes.",
+    completed: "Completada",
+    leadsNeedFollowUp: "{count} clientes potenciales necesitan seguimiento",
+    followUpPrompt: "Responde pronto para ganar más trabajos.",
+    totalCustomers: "Total de clientes",
+    lifetimeValue: "Valor total",
+    noPhone: "Sin teléfono registrado",
+    noAddressOnFile: "Sin dirección registrada",
+    aiMinutesAgenda: "Minutos AI y agenda",
+    yourPlan: "Tu plan",
+    minutesUsage: "Uso de minutos",
+    graceMinutes: "Minutos de gracia",
+    overageRate: "Tarifa de exceso",
+    todaysAgendaAt: "Agenda de hoy · 5 AM",
+    agendaPrepared: "Ana preparó tu actualización diaria.",
+    jobsScheduledToday: "{count} trabajos programados hoy",
+    leadsNeedFollowUpShort: "{count} clientes potenciales por atender",
+    noOverdueFollowUps: "No hay seguimientos vencidos",
+    openAgenda: "Ver agenda completa",
     revenue: "Ingresos",
     recovered: "Llamadas recuperadas",
     aiCallMinutes: "Minutos AI",
@@ -139,7 +181,7 @@ const copy = {
     bookingDate: "Fecha y hora",
     bookingValue: "Valor estimado",
     yardCleaningBooking: "Reserva de limpieza de patio",
-    currentBookings: "Reservas actuales",
+    currentBookings: "Hoy",
     leadBookings: "Clientes potenciales",
     leadBookingsSubtitle: "Solicitudes que necesitan seguimiento o una cita.",
     pastBooking: "Reservas pasadas",
@@ -173,13 +215,6 @@ const copy = {
     phoneSetupSubtitle: "Cómo Ana recibe llamadas y mensajes para este negocio.",
     ownerSummarySettings: "Resúmenes para el dueño",
     ownerSummarySettingsSubtitle: "Elige cómo Ana agenda trabajos, explica horarios y envía resúmenes.",
-    minuteLimitBehavior: "Cuando se usen los minutos mensuales",
-    continueOverage: "Continuar llamadas y cobrar exceso",
-    continueOverageDescription: "Ana sigue contestando y los minutos extra se cobran según tu tarifa.",
-    takeVoicemail: "Detener llamadas AI y tomar buzón de voz básico",
-    takeVoicemailDescription: "La persona deja su nombre, número y motivo de la llamada.",
-    forwardAtLimit: "Reenviar llamadas al dueño",
-    forwardAtLimitDescription: "Las llamadas nuevas van al teléfono privado configurado.",
     availabilitySettings: "Días cerrados",
     availabilitySettingsSubtitle: "Bloquea vacaciones, días festivos o cierres para que Ana no ofrezca citas.",
     closureReason: "Motivo",
@@ -367,8 +402,41 @@ const copy = {
   },
   en: {
     home: "Home",
+    todayAtGlance: "Today at a glance",
     totalBookings: "Bookings today",
     todayJobs: "Jobs today",
+    newLeads: "New leads",
+    needsAttention: "Needs attention",
+    aiMinutesLeft: "AI minutes left",
+    scheduled: "Scheduled",
+    needFollowUp: "Need follow-up",
+    overdue: "Overdue",
+    ofMinutes: "of {minutes} min",
+    viewAll: "View all",
+    quickActions: "Quick actions",
+    callBack: "Call back",
+    sendQuote: "Send quote",
+    textCustomer: "Text customer",
+    latestAnaActivity: "Latest call with Ana",
+    noRecentCalls: "No recent calls.",
+    completed: "Completed",
+    leadsNeedFollowUp: "{count} leads need follow-up",
+    followUpPrompt: "Respond quickly to win more jobs.",
+    totalCustomers: "Total customers",
+    lifetimeValue: "Lifetime value",
+    noPhone: "No phone on file",
+    noAddressOnFile: "No address on file",
+    aiMinutesAgenda: "AI Minutes & Agenda",
+    yourPlan: "Your plan",
+    minutesUsage: "Minutes usage",
+    graceMinutes: "Grace minutes",
+    overageRate: "Overage rate",
+    todaysAgendaAt: "Today's agenda · 5 AM",
+    agendaPrepared: "Ana has prepared your daily update.",
+    jobsScheduledToday: "{count} jobs scheduled today",
+    leadsNeedFollowUpShort: "{count} leads need follow-up",
+    noOverdueFollowUps: "No overdue follow-ups",
+    openAgenda: "View full agenda",
     revenue: "Revenue",
     recovered: "Recovered calls",
     aiCallMinutes: "AI minutes",
@@ -429,7 +497,7 @@ const copy = {
     bookingDate: "Date and time",
     bookingValue: "Estimated value",
     yardCleaningBooking: "Yard cleaning booking",
-    currentBookings: "Current bookings",
+    currentBookings: "Today",
     leadBookings: "Leads",
     leadBookingsSubtitle: "Requests that need follow-up or a scheduled appointment.",
     pastBooking: "Past booking",
@@ -463,13 +531,6 @@ const copy = {
     phoneSetupSubtitle: "How Ana receives calls and texts for this business.",
     ownerSummarySettings: "Owner summaries",
     ownerSummarySettingsSubtitle: "Choose how Ana schedules jobs, explains hours, and sends owner summaries.",
-    minuteLimitBehavior: "When monthly minutes are used",
-    continueOverage: "Continue calls and bill overage",
-    continueOverageDescription: "Ana keeps answering and extra minutes are billed at your configured rate.",
-    takeVoicemail: "Stop AI calls and take basic voicemail",
-    takeVoicemailDescription: "Callers leave their name, number, and reason for calling.",
-    forwardAtLimit: "Forward calls to owner",
-    forwardAtLimitDescription: "New calls go to the configured private owner phone.",
     availabilitySettings: "Closed dates",
     availabilitySettingsSubtitle: "Block vacations, holidays, or closures so Ana does not offer appointments.",
     closureReason: "Reason",
@@ -1116,6 +1177,10 @@ export function OwnerDashboard({
   const currentActiveCall = useMemo(() => activeCall(data.calls), [data.calls]);
   const mostRecentCall = useMemo(() => latestCall(data.calls), [data.calls]);
   const trackedCall = currentActiveCall ?? mostRecentCall;
+  const attentionCount =
+    leadBookings.filter((job) => ["pending_owner_approval", "needs_reschedule", "needs_callback"].includes(job.status)).length +
+    data.customerReminders.length +
+    (pendingQuote ? 1 : 0);
   const durationNow = clientNow ?? new Date(data.generatedAt);
   const trackedCallDuration = trackedCall ? formatDuration(callDurationSeconds(trackedCall, durationNow)) : "00:00";
 
@@ -1267,19 +1332,31 @@ export function OwnerDashboard({
   return (
     <>
       {activeTab === "home" ? (
-        <div className="grid">
-          <div className="grid stats-grid">
-            <Stat featured href={`/owner?lang=${language}&tab=bookings`} label={t.totalBookings} value={data.metrics.totalBookings} foot="" icon={<CalendarIcon />} />
-            <Stat label={t.todayJobs} value={data.metrics.todayJobs} foot={t.today} icon={<LeafIcon />} />
-            <Stat label={t.revenue} value={formatCurrency(data.metrics.revenue)} foot={t.currentData} icon={<DollarIcon />} />
-            <Stat label={t.recovered} value={data.metrics.recoveredCalls} foot={t.aiOutcomes} icon={<MessageIcon />} />
-          </div>
+        <div className="grid owner-home">
+          <section className="owner-home-glance">
+            <h2>{t.todayAtGlance}</h2>
+            <div className="grid stats-grid">
+              <Stat href={`/owner?lang=${language}&tab=bookings`} label={t.todayJobs} value={todayJobs.length} foot={t.scheduled} icon={<CalendarIcon />} />
+              <Stat href={`/owner?lang=${language}&tab=bookings`} label={t.newLeads} value={leadBookings.length} foot={t.needFollowUp} icon={<UsersIcon />} />
+              <Stat label={t.needsAttention} value={attentionCount} foot={t.overdue} icon={<AlertTriangle />} />
+              <Stat
+                href="#ai-minutes"
+                label={t.aiMinutesLeft}
+                value={formatMinutes(data.aiCallUsage.remainingMinutes)}
+                foot={t.ofMinutes.replace("{minutes}", formatMinutes(data.aiCallUsage.allowanceMinutes))}
+                icon={<Clock3 />}
+              />
+            </div>
+          </section>
           <div className="grid two-col">
-            <section className="card">
-              <h2>{t.agenda}</h2>
-              <JobList empty={t.noJobs} jobs={todayJobs} labels={t} onOpenJob={(job) => setDetailBooking(job)} />
+            <section className="card home-jobs-card">
+              <div className="section-card-header compact">
+                <h2>{t.agenda}</h2>
+                <Link href={`/owner?lang=${language}&tab=bookings`}>{t.viewAll}</Link>
+              </div>
+              <JobList empty={t.noJobs} jobs={todayJobs.slice(0, 3)} labels={t} onOpenJob={(job) => setDetailBooking(job)} />
             </section>
-            <section className="card dark">
+            <section className="card dark desktop-home-support">
               <h2>{t.pendingQuote}</h2>
               {pendingQuote ? (
                 <div className="list">
@@ -1316,9 +1393,66 @@ export function OwnerDashboard({
               )}
             </section>
           </div>
-          <CustomerReminderList data={data} labels={t} />
-          <AiCallMinutesCard data={data} labels={t} />
-          <div className="grid three-col">
+          <section className="mobile-home-card mobile-quick-actions">
+            <h2>{t.quickActions}</h2>
+            <div className="quick-action-grid">
+              <button onClick={() => setIsBookingModalOpen(true)} type="button">
+                <span className="quick-action-icon orange"><CalendarPlus /></span>
+                <span>{t.addBooking}</span>
+              </button>
+              {trackedCall?.from_phone ? (
+                <a href={`tel:${trackedCall.from_phone}`}>
+                  <span className="quick-action-icon green"><Phone /></span>
+                  <span>{t.callBack}</span>
+                </a>
+              ) : (
+                <button disabled type="button">
+                  <span className="quick-action-icon green"><Phone /></span>
+                  <span>{t.callBack}</span>
+                </button>
+              )}
+              <Link href={`/owner?lang=${language}&tab=quotes`}>
+                <span className="quick-action-icon gold"><FileText /></span>
+                <span>{t.sendQuote}</span>
+              </Link>
+              {trackedCall?.from_phone ? (
+                <a href={`sms:${trackedCall.from_phone}`}>
+                  <span className="quick-action-icon green"><MessageSquareText /></span>
+                  <span>{t.textCustomer}</span>
+                </a>
+              ) : (
+                <button disabled type="button">
+                  <span className="quick-action-icon green"><MessageSquareText /></span>
+                  <span>{t.textCustomer}</span>
+                </button>
+              )}
+            </div>
+          </section>
+          <section className="card mobile-latest-call">
+            <div className="section-card-header compact">
+              <h2>{t.latestAnaActivity}</h2>
+              {trackedCall ? <span>{formatDateTime(trackedCall.started_at)}</span> : null}
+            </div>
+            {trackedCall ? (
+              <button className="latest-call-button" onClick={() => router.push(`/owner?lang=${language}&tab=messages`)} type="button">
+                <div>
+                  <strong>{callCallerName(trackedCall, t)}</strong>
+                  <p>{compactPreview(callSummary(trackedCall, data.summaries, t), 90)}</p>
+                </div>
+                <span className="pill success">{currentActiveCall ? t.activeCall : t.completed}</span>
+              </button>
+            ) : (
+              <div className="empty-state">{t.noRecentCalls}</div>
+            )}
+          </section>
+          <div className="desktop-home-support">
+            <CustomerReminderList data={data} labels={t} />
+          </div>
+          <div className="owner-ai-agenda-grid" id="ai-minutes">
+            <AiCallMinutesCard data={data} labels={t} />
+            <DailyAgendaCard labels={t} language={language} leadCount={leadBookings.length} todayJobCount={todayJobs.length} />
+          </div>
+          <div className="grid three-col desktop-home-support">
             <section className="card span-2">
               <div className="analytics-card-header">
                 <h2>{t.aiCallAnalytics}</h2>
@@ -1527,10 +1661,13 @@ function JobList({
               <span>{job.address ?? labels.noAddress}</span>
             </div>
           </div>
-          <button className="icon-action-button agenda-view-button" onClick={() => onOpenJob(job)} type="button">
-            <EyeIcon />
-            <span>{labels.viewBooking}</span>
-          </button>
+          <div className="agenda-job-actions">
+            <StatusPill label={statusLabel(labels, job.status)} status={job.status} />
+            <button className="icon-action-button agenda-view-button" onClick={() => onOpenJob(job)} type="button">
+              <EyeIcon />
+              <span>{labels.viewBooking}</span>
+            </button>
+          </div>
         </article>
       ))}
     </div>
@@ -1577,41 +1714,70 @@ function AiCallMinutesCard({ data, labels }: { data: OwnerPortalData; labels: Ow
 
   return (
     <section className="card call-minutes-card">
-      <div className="section-card-header">
+      <div className="section-card-header minutes-section-heading">
         <div>
-          <h2>{labels.aiCallMinutes}</h2>
-          <p className="meta">{labels.aiCallMinutesSubtitle}</p>
+          <h2>{labels.aiMinutesAgenda}</h2>
+          <p className="meta">{usage.monthLabel}</p>
         </div>
-        <strong className="customer-count-badge">{usage.monthLabel}</strong>
+      </div>
+      <div className="plan-summary">
+        <div>
+          <span>{labels.yourPlan}</span>
+          <strong>{usage.planName} Plan</strong>
+          <small>{formatMinutes(usage.allowanceMinutes)} {labels.includedMinutes.toLowerCase()}</small>
+        </div>
+        <span className="plan-leaf"><LeafIcon /></span>
+      </div>
+      <div className="minutes-usage-heading">
+        <div>
+          <span>{labels.minutesUsage}</span>
+          <strong>{formatMinutes(usage.usedMinutes)} <small>min {labels.usedMinutes.toLowerCase()}</small></strong>
+        </div>
+        <strong>{formatMinutes(usage.remainingMinutes)} <small>min {labels.remainingMinutes.toLowerCase()}</small></strong>
       </div>
       <div className="usage-meter large" aria-label={`${usage.usagePercent.toFixed(0)} percent used`}>
         <span style={{ width: `${usage.usagePercent}%` }} />
       </div>
-      <div className="grid three-col">
-        <article className="row-card">
-          <strong>{labels.plan}</strong>
-          <div className="meta">
-            {usage.planName} · {formatMinutes(usage.allowanceMinutes)} {labels.includedMinutes.toLowerCase()} · {labels.overageStartsAfter.toLowerCase()}{" "}
-            {formatMinutes(usage.overageStartsAtMinutes)} min
-          </div>
-        </article>
-        <article className="row-card">
-          <strong>{labels.usedMinutes}</strong>
-          <div className="meta">{formatMinutes(usage.usedMinutes)} min</div>
-        </article>
-        <article className="row-card">
-          <strong>{labels.remainingMinutes}</strong>
-          <div className="meta">{formatMinutes(usage.remainingMinutes)} min</div>
-        </article>
-        <article className="row-card">
-          <strong>{labels.extraMinutes}</strong>
-          <div className="meta">{formatMinutes(usage.overageMinutes)} min</div>
-        </article>
-        <article className="row-card">
-          <strong>{labels.overageCharge}</strong>
-          <div className="meta">{formatCurrency(usage.overageAmount)} · {overageRateText}</div>
-        </article>
+      <div className="usage-scale">
+        <span>0 min</span>
+        <span>{formatMinutes(usage.allowanceMinutes)} min</span>
       </div>
+      <div className="minutes-detail-grid">
+        <div><span>{labels.remainingMinutes}</span><strong>{formatMinutes(usage.remainingMinutes)} <small>min</small></strong></div>
+        <div><span>{labels.graceMinutes}</span><strong>{formatMinutes(usage.graceMinutes)} <small>min</small></strong></div>
+        <div><span>{labels.extraMinutes}</span><strong>{formatMinutes(usage.overageMinutes)} <small>min</small></strong></div>
+        <div><span>{labels.overageRate}</span><strong>{overageRateText}</strong></div>
+      </div>
+    </section>
+  );
+}
+
+function DailyAgendaCard({
+  labels,
+  language,
+  leadCount,
+  todayJobCount
+}: {
+  labels: OwnerCopy;
+  language: Lang;
+  leadCount: number;
+  todayJobCount: number;
+}) {
+  return (
+    <section className="card daily-agenda-card">
+      <div className="daily-agenda-heading">
+        <div>
+          <h2>{labels.todaysAgendaAt}</h2>
+          <p className="meta">{labels.agendaPrepared}</p>
+        </div>
+        <Sun />
+      </div>
+      <div className="daily-agenda-list">
+        <span><CheckCircle2 />{labels.jobsScheduledToday.replace("{count}", String(todayJobCount))}</span>
+        <span className={leadCount ? "attention" : ""}><AlertTriangle />{labels.leadsNeedFollowUpShort.replace("{count}", String(leadCount))}</span>
+        <span><CheckCircle2 />{labels.noOverdueFollowUps}</span>
+      </div>
+      <Link href={`/owner?lang=${language}&tab=bookings`}>{labels.openAgenda}<ChevronRight /></Link>
     </section>
   );
 }
@@ -1782,7 +1948,7 @@ function BusinessHoursDropdowns({ initialText, labels }: { initialText?: string 
       <input name="businessHoursText" type="hidden" value={businessHoursText(selectedDays, startTime, endTime)} />
       <div className="field">
         <span>{labels.businessDays}</span>
-        <div className="service-dropdown compact">
+        <div className="service-dropdown">
           <details ref={detailsRef}>
             <summary title={businessDaysText(selectedDays)}>
               <span>{selectedDayText}</span>
@@ -1995,41 +2161,6 @@ function SummarySettingsForm({
             <span>{labels.availableServices}</span>
             <ServicesDropdown initialServices={selectedServices} labels={labels} />
           </div>
-          <fieldset className="field full">
-            <legend>{labels.minuteLimitBehavior}</legend>
-            <div className="list">
-              {[
-                {
-                  description: labels.continueOverageDescription,
-                  label: labels.continueOverage,
-                  value: "continue_overage"
-                },
-                {
-                  description: labels.takeVoicemailDescription,
-                  label: labels.takeVoicemail,
-                  value: "voicemail"
-                },
-                {
-                  description: labels.forwardAtLimitDescription,
-                  label: labels.forwardAtLimit,
-                  value: "forward_owner"
-                }
-              ].map((option) => (
-                <label className="row-card checkbox-field" key={option.value}>
-                  <input
-                    defaultChecked={(business.minute_limit_policy ?? "continue_overage") === option.value}
-                    name="minuteLimitPolicy"
-                    type="radio"
-                    value={option.value}
-                  />
-                  <span>
-                    <strong>{option.label}</strong>
-                    <small className="meta">{option.description}</small>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
         </div>
         {state.error ? <p className="form-error" style={{ marginTop: 16 }}>{state.error}</p> : null}
         {state.success ? <p className="form-success" style={{ marginTop: 16 }}>{state.success}</p> : null}
@@ -2109,6 +2240,7 @@ function ServiceAreaSettingsForm({
 function SettingsTab({ csrfToken, data, labels, onSaved }: { csrfToken: string; data: OwnerPortalData; labels: OwnerCopy; onSaved: (message: string) => void }) {
   return (
     <div className="grid">
+      <h1 className="mobile-tab-title">{labels.settings}</h1>
       <AvailabilityExceptionsForm csrfToken={csrfToken} exceptions={data.availabilityExceptions} labels={labels} onSaved={onSaved} />
       <ServiceAreaSettingsForm csrfToken={csrfToken} data={data} labels={labels} onSaved={onSaved} />
       <SummarySettingsForm business={data.business} csrfToken={csrfToken} labels={labels} onSaved={onSaved} />
@@ -2182,7 +2314,7 @@ function BookingsTab({
   const [searchQuery, setSearchQuery] = useState("");
   const visibleJobs = bookingView === "current" ? currentJobs : bookingView === "leads" ? leadJobs : pastJobs;
   const filteredJobs = useMemo(
-    () => visibleJobs.filter((job) => matchesSearch(searchQuery, job.customers?.full_name, job.address, job.customers?.address)),
+    () => visibleJobs.filter((job) => matchesSearch(searchQuery, job.customers?.full_name, job.service_type, job.address, job.customers?.address)),
     [searchQuery, visibleJobs]
   );
   const activeBookingLabel = bookingView === "current" ? labels.currentBookings : bookingView === "leads" ? labels.leadBookings : labels.pastBooking;
@@ -2220,6 +2352,14 @@ function BookingsTab({
           </button>
         </div>
       </div>
+      {bookingView === "leads" && leadJobs.length ? (
+        <div className="lead-followup-banner">
+          <div>
+            <strong>{labels.leadsNeedFollowUp.replace("{count}", String(leadJobs.length))}</strong>
+            <span>{labels.followUpPrompt}</span>
+          </div>
+        </div>
+      ) : null}
       <DirectorySearch
         clearLabel={labels.clearSearch}
         count={filteredJobs.length}
@@ -2288,21 +2428,22 @@ function BookingsTab({
             <article className="mobile-directory-card" key={job.id}>
               <div className="mobile-directory-card-header">
                 <div>
-                  <strong>{bookingTitleLabel(labels, job)}</strong>
-                  <span>{customerName(job.customers, labels.newCustomer)}</span>
+                  <strong>{customerName(job.customers, labels.newCustomer)}</strong>
+                  <span>{bookingTitleLabel(labels, job)}</span>
                 </div>
-                <span className="mobile-directory-value">{formatCurrency(job.final_value ?? job.estimated_value)}</span>
+                <StatusPill label={statusLabel(labels, job.status)} status={job.status} />
               </div>
               <dl className="mobile-directory-details">
                 <div>
-                  <dt>{bookingView === "leads" ? labels.status : labels.schedule}</dt>
-                  <dd>{bookingView === "leads" ? statusLabel(labels, job.status) : formatDateTime(job.scheduled_start)}</dd>
+                  <dt>{labels.schedule}</dt>
+                  <dd>{job.scheduled_start ? formatDateTime(job.scheduled_start) : labels.notSet}</dd>
                 </div>
                 <div>
                   <dt>{labels.address}</dt>
                   <dd>{job.address ?? labels.noAddress}</dd>
                 </div>
               </dl>
+              <span className="mobile-directory-value booking-value">{formatCurrency(job.final_value ?? job.estimated_value)}</span>
               <div className="mobile-row-actions">
                 <button className="icon-action-button" onClick={() => onOpenBooking(job)} type="button">
                   <EyeIcon />
@@ -2349,7 +2490,7 @@ function CustomersTab({
   const sortedCustomers = useMemo(
     () =>
       customers
-        .filter((customer) => matchesSearch(searchQuery, customer.full_name, customer.address))
+        .filter((customer) => matchesSearch(searchQuery, customer.full_name, customer.phone, customer.address))
         .sort((first, second) => {
           const result = first.full_name.localeCompare(second.full_name, undefined, { sensitivity: "base" });
           return sortDirection === "asc" ? result : -result;
@@ -2456,7 +2597,7 @@ function CustomersTab({
               <div className="mobile-directory-card-header">
                 <div>
                   <strong>{customer.full_name}</strong>
-                  <span>{formatPhone(customer.phone) ?? labels.missing}</span>
+                  <span>{formatPhone(customer.phone) ?? labels.noPhone}</span>
                 </div>
                 <span className="mobile-directory-value">{serviceFeeLabel(customer.service_fee)}</span>
               </div>
@@ -2467,7 +2608,7 @@ function CustomersTab({
                 </div>
                 <div>
                   <dt>{labels.address}</dt>
-                  <dd>{customer.address ?? labels.noAddress}</dd>
+                  <dd>{customer.address ?? labels.noAddressOnFile}</dd>
                 </div>
               </dl>
               <div className="mobile-row-actions">
@@ -2497,6 +2638,7 @@ function CustomersTab({
 function QuotesTab({ quotes, labels, onAction }: { quotes: OwnerPortalData["quotes"]; labels: OwnerCopy; onAction: () => void }) {
   return (
     <section className="card">
+      <h1 className="mobile-tab-title">{labels.quotes}</h1>
       <h2>{labels.quotes}</h2>
       <div className="list">
         {quotes.map((quote) => (
@@ -2526,6 +2668,7 @@ function MessagesTab({ data, labels }: { data: OwnerPortalData; labels: OwnerCop
 
   return (
     <div className="grid two-col">
+      <h1 className="mobile-tab-title span-2">{labels.messages}</h1>
       <section className="card span-2">
         <div className="section-card-header">
           <div>

@@ -45,6 +45,7 @@ const browserRenderedSource = sourceFiles(new URL("../app/", import.meta.url))
   .map((fileUrl) => fs.readFileSync(fileUrl, "utf8"))
   .join("\n");
 const adminDashboardSource = fs.readFileSync(new URL("../components/admin/admin-dashboard.tsx", import.meta.url), "utf8");
+const ownerDashboardSource = fs.readFileSync(new URL("../components/owner/owner-dashboard.tsx", import.meta.url), "utf8");
 const accountHealthSource = adminDashboardSource.slice(
   adminDashboardSource.indexOf("function AccountTable"),
   adminDashboardSource.indexOf("function accountLaunchChecks")
@@ -214,10 +215,11 @@ assert.equal(
   "Admin should configure all monthly minute-limit behaviors"
 );
 assert.equal(
-  ownerActionsSource.includes("minute_limit_policy: minuteLimitPolicy") &&
-    browserRenderedSource.includes('name="minuteLimitPolicy"'),
+  !ownerActionsSource.includes('formData.get("minuteLimitPolicy")') &&
+    !ownerActionsSource.includes("minute_limit_policy: minuteLimitPolicy") &&
+    !ownerDashboardSource.includes('name="minuteLimitPolicy"'),
   true,
-  "Owners should be able to save their monthly minute-limit behavior"
+  "Only admins should be able to configure monthly minute-limit behavior"
 );
 assert.equal(
   adminDashboardSource.includes('name="onboardingFee"') &&

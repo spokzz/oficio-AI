@@ -35,7 +35,6 @@ export type OwnerClosureState = {
 
 const ownerSummaryLanguages = ["en", "es"] as const;
 const ownerSummaryChannels = ["sms", "email"] as const;
-const minuteLimitPolicies = ["continue_overage", "voicemail", "forward_owner"] as const;
 const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidTimeZone(value: string) {
@@ -135,7 +134,6 @@ function ownerSettingsSnapshot(value: {
   available_services?: unknown;
   booking_time_zone?: unknown;
   business_hours_text?: unknown;
-  minute_limit_policy?: unknown;
   owner_summary_channel?: unknown;
   owner_summary_language?: unknown;
 }) {
@@ -143,7 +141,6 @@ function ownerSettingsSnapshot(value: {
     available_services: value.available_services,
     booking_time_zone: value.booking_time_zone,
     business_hours_text: value.business_hours_text,
-    minute_limit_policy: value.minute_limit_policy,
     owner_summary_channel: value.owner_summary_channel,
     owner_summary_language: value.owner_summary_language
   };
@@ -218,7 +215,6 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
   const ownerSummaryChannel = String(formData.get("ownerSummaryChannel") ?? "sms");
   const bookingTimeZone = String(formData.get("bookingTimeZone") ?? "America/Chicago").trim();
   const businessHoursText = String(formData.get("businessHoursText") ?? "").trim();
-  const minuteLimitPolicy = String(formData.get("minuteLimitPolicy") ?? "continue_overage");
   const availableServices = formData
     .getAll("availableServices")
     .map((service) => String(service))
@@ -244,10 +240,6 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
     return { error: "Choose at least one valid service." };
   }
 
-  if (!minuteLimitPolicies.includes(minuteLimitPolicy as (typeof minuteLimitPolicies)[number])) {
-    return { error: "Choose a valid monthly minute limit behavior." };
-  }
-
   const owner = await ownerBusinessId();
   if ("error" in owner) {
     return { error: owner.error };
@@ -255,22 +247,18 @@ export async function updateOwnerSettings(_state: OwnerSettingsState, formData: 
 
   const { data: beforeSettings, error: beforeSettingsError } = await owner.supabase
     .from("businesses")
-    .select("available_services,booking_time_zone,business_hours_text,minute_limit_policy,owner_summary_channel,owner_summary_language,owner_transfer_phone")
+    .select("available_services,booking_time_zone,business_hours_text,owner_summary_channel,owner_summary_language")
     .eq("id", owner.businessId)
     .maybeSingle();
 
   if (beforeSettingsError) {
     return { error: beforeSettingsError.message };
   }
-  if (minuteLimitPolicy === "forward_owner" && !beforeSettings?.owner_transfer_phone) {
-    return { error: "Ask Oficio Admin to add an owner transfer phone before selecting call forwarding." };
-  }
 
   const afterSettings = {
     available_services: availableServices.length ? availableServices : serviceOptionDefaults(),
     booking_time_zone: bookingTimeZone,
     business_hours_text: businessHoursText,
-    minute_limit_policy: minuteLimitPolicy,
     owner_summary_channel: ownerSummaryChannel,
     owner_summary_language: ownerSummaryLanguage
   };
